@@ -343,6 +343,90 @@
             color: #666;
             padding: 4px;
         }
+        .vocab-mic-area {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin: 12px 0;
+            align-items: center;
+        }
+        .vocab-mic-btn {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: none;
+            background: #333;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        .vocab-mic-btn.recording {
+            background: #e94560;
+            animation: pulse 1s infinite;
+        }
+        .vocab-user-said {
+            font-size: 14px;
+            color: #aaa;
+            text-align: center;
+            min-height: 20px;
+            margin: 8px 0;
+        }
+        .vocab-result {
+            text-align: center;
+            padding: 12px;
+            border-radius: 12px;
+            margin: 8px 0;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .vocab-result.correct {
+            background: #1b4332;
+            color: #52b788;
+        }
+        .vocab-result.incorrect {
+            background: #4a1525;
+            color: #e94560;
+        }
+        .vocab-score {
+            text-align: center;
+            font-size: 13px;
+            color: #888;
+            padding: 4px;
+        }
+
+        /* 学習記録・ストリーク */
+        .streak-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #16213e;
+            font-size: 13px;
+            color: #aaa;
+        }
+        .streak-fire { font-size: 18px; }
+        .streak-count { color: #e94560; font-weight: bold; font-size: 16px; }
+        .streak-calendar {
+            display: flex;
+            gap: 3px;
+            justify-content: center;
+            padding: 4px 16px;
+            background: #16213e;
+            border-bottom: 1px solid #0f3460;
+        }
+        .streak-day {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            background: #2a2a4a;
+        }
+        .streak-day.done {
+            background: #52b788;
+        }
+        .streak-day.today {
+            border: 1px solid #e94560;
+        }
     </style>
 </head>
 <body>
@@ -636,6 +720,8 @@ Output ONLY in this exact JSON format, no other text:
             chatArea.scrollTop = chatArea.scrollHeight;
 
             ds.results.push({ ja: currentLine.ja, userSaid: text, evaluation });
+            recordActivity('drama', 1);
+            updateStreakDisplay();
 
         } catch (err) {
             appendMessage('ai', `[エラー] ${err.message}`);
@@ -666,8 +752,92 @@ Output ONLY in this exact JSON format, no other text:
         startDrama();
     }
 
+    // --- 学習記録・ストリーク ---
+    function getToday() {
+        return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    }
+
+    function loadStudyLog() {
+        try { return JSON.parse(localStorage.getItem('eikaiwa_study_log')) || {}; } catch { return {}; }
+    }
+
+    function saveStudyLog(log) {
+        localStorage.setItem('eikaiwa_study_log', JSON.stringify(log));
+    }
+
+    function recordActivity(mode, count) {
+        const log = loadStudyLog();
+        const today = getToday();
+        if (!log[today]) log[today] = {};
+        if (!log[today][mode]) log[today][mode] = 0;
+        log[today][mode] += count;
+        saveStudyLog(log);
+    }
+
+    function getStreak() {
+        const log = loadStudyLog();
+        const today = new Date();
+        let streak = 0;
+        for (let i = 0; i < 365; i++) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            const key = d.toISOString().slice(0, 10);
+            if (log[key]) {
+                streak++;
+            } else if (i > 0) {
+                break;
+            } else {
+                break; // 今日まだやってなければ昨日から数える
+            }
+        }
+        // 今日まだやってない場合、昨日から数える
+        if (!log[getToday()]) {
+            streak = 0;
+            for (let i = 1; i < 365; i++) {
+                const d = new Date(today);
+                d.setDate(d.getDate() - i);
+                const key = d.toISOString().slice(0, 10);
+                if (log[key]) { streak++; } else { break; }
+            }
+        }
+        return streak;
+    }
+
+    function renderStreakBar() {
+        const log = loadStudyLog();
+        const today = new Date();
+        const streak = getStreak();
+
+        let days = '';
+        for (let i = 13; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            const key = d.toISOString().slice(0, 10);
+            const done = log[key] ? 'done' : '';
+            const isToday = i === 0 ? 'today' : '';
+            days += `<div class="streak-day ${done} ${isToday}" title="${key}"></div>`;
+        }
+
+        return `
+            <div class="streak-bar">
+                <span class="streak-fire">&#128293;</span>
+                <span class="streak-count">${streak}</span>日連続
+                <span style="margin-left:8px;color:#666;">|</span>
+                <span style="margin-left:8px;color:#666;">今日: ${log[getToday()] ? Object.values(log[getToday()]).reduce((a,b)=>a+b,0) + '問' : '未学習'}</span>
+            </div>
+            <div class="streak-calendar">${days}</div>`;
+    }
+
+    function updateStreakDisplay() {
+        const el = document.getElementById('streakArea');
+        if (el) el.innerHTML = renderStreakBar();
+    }
+
     // --- 単語学習モード ---
-    let vocabState = null; // { category, words, index, revealed }
+    let vocabState = null;
+    let vocabMicRecording = false;
+    let vocabRecognition = null;
+    let vocabConfirmedText = '';
 
     function initVocab() {
         const chatArea = document.getElementById('chatArea');
@@ -684,13 +854,42 @@ Output ONLY in this exact JSON format, no other text:
 
     function selectVocabCategory(cat) {
         const words = [...VOCAB_DATA[cat]];
-        // シャッフル
         for (let i = words.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [words[i], words[j]] = [words[j], words[i]];
         }
-        vocabState = { category: cat, words, index: 0, revealed: false };
+        vocabState = { category: cat, words, index: 0, revealed: false, userSaid: '', result: null, correct: 0, total: 0 };
         renderVocabCard();
+    }
+
+    function normalize(s) {
+        return s.toLowerCase().replace(/[.,!?'";\-:]/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    function checkVocabAnswer(userText, word) {
+        const norm = normalize(userText);
+        const allAnswers = [...word.en, ...word.native];
+        // 完全一致
+        for (const ans of allAnswers) {
+            if (normalize(ans) === norm) return { match: true, exact: true, matched: ans };
+        }
+        // 部分一致（ユーザーの発言が答えを含む、または答えがユーザーの発言を含む）
+        for (const ans of allAnswers) {
+            const normAns = normalize(ans);
+            if (norm.includes(normAns) || normAns.includes(norm)) {
+                return { match: true, exact: false, matched: ans };
+            }
+        }
+        // 単語レベルの類似度チェック
+        const userWords = new Set(norm.split(' '));
+        for (const ans of allAnswers) {
+            const ansWords = new Set(normalize(ans).split(' '));
+            const common = [...userWords].filter(w => ansWords.has(w) && w.length > 2);
+            if (common.length >= Math.min(ansWords.size, userWords.size) * 0.6) {
+                return { match: true, exact: false, matched: ans };
+            }
+        }
+        return { match: false };
     }
 
     function renderVocabCard() {
@@ -698,13 +897,26 @@ Output ONLY in this exact JSON format, no other text:
         const word = vs.words[vs.index];
         const chatArea = document.getElementById('chatArea');
 
-        // カテゴリボタン
         const categories = Object.keys(VOCAB_DATA);
         let catBtns = categories.map(cat =>
             `<button class="vocab-cat-btn ${cat === vs.category ? 'active' : ''}" onclick="selectVocabCategory('${cat}')">${cat}</button>`
         ).join('');
 
-        let answerHtml;
+        // 結果表示
+        let resultHtml = '';
+        if (vs.result !== null) {
+            if (vs.result) {
+                resultHtml = `<div class="vocab-result correct">&#9989; 正解！</div>`;
+            } else {
+                resultHtml = `<div class="vocab-result incorrect">&#10060; 不正解</div>`;
+            }
+            if (vs.userSaid) {
+                resultHtml += `<div class="vocab-user-said">あなたの発言: "${escapeHtml(vs.userSaid)}"</div>`;
+            }
+        }
+
+        // 答え表示（正解/不正解後、またはスキップ時）
+        let answerHtml = '';
         if (vs.revealed) {
             answerHtml = `
                 <div class="vocab-en-list">
@@ -723,28 +935,124 @@ Output ONLY in this exact JSON format, no other text:
                         </div>`).join('')}
                     </div>
                 </div>`;
-        } else {
-            answerHtml = `
-                <div class="vocab-hidden">
-                    <button class="vocab-reveal-btn" onclick="revealVocab()">答えを見る</button>
+        }
+
+        // マイク＆スキップ（未回答時のみ）
+        let inputHtml = '';
+        if (vs.result === null) {
+            inputHtml = `
+                <div class="vocab-mic-area">
+                    <button class="vocab-mic-btn" id="vocabMicBtn" onclick="toggleVocabMic()">&#127908;</button>
+                </div>
+                <div class="vocab-user-said" id="vocabLiveText">${vs.userSaid ? escapeHtml(vs.userSaid) : 'マイクボタンを押して英語で言ってみよう'}</div>
+                <div style="text-align:center;margin-top:8px;">
+                    <button class="vocab-reveal-btn" onclick="skipVocab()" style="font-size:12px;padding:6px 16px;">スキップ（答えを見る）</button>
                 </div>`;
         }
 
         chatArea.innerHTML = `
             <div class="vocab-categories">${catBtns}</div>
-            <div class="vocab-progress">${vs.index + 1} / ${vs.words.length}</div>
+            <div class="vocab-score">正解: ${vs.correct} / ${vs.total} | ${vs.index + 1} / ${vs.words.length}</div>
             <div class="vocab-card">
                 <div class="vocab-ja">${escapeHtml(word.ja)}</div>
+                ${inputHtml}
+                ${resultHtml}
                 ${answerHtml}
             </div>
             <div class="vocab-nav">
                 <button class="btn-prev" onclick="vocabPrev()" ${vs.index === 0 ? 'disabled' : ''}>&#9664; 前</button>
                 <button class="btn-next" onclick="vocabNext()">${vs.index < vs.words.length - 1 ? '次 &#9654;' : 'もう一度 &#8635;'}</button>
             </div>`;
+
+        // 録音中なら赤くする
+        if (vocabMicRecording) {
+            const btn = document.getElementById('vocabMicBtn');
+            if (btn) btn.classList.add('recording');
+        }
     }
 
-    function revealVocab() {
+    function toggleVocabMic() {
+        if (vocabMicRecording) {
+            // 停止 → 判定
+            vocabMicRecording = false;
+            if (vocabRecognition) vocabRecognition.stop();
+            const btn = document.getElementById('vocabMicBtn');
+            if (btn) btn.classList.remove('recording');
+            // 判定
+            submitVocabAnswer();
+            return;
+        }
+
+        // 開始
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) { alert('音声入力に対応していません'); return; }
+
+        vocabConfirmedText = '';
+        vocabState.userSaid = '';
+        const rec = new SpeechRecognition();
+        rec.continuous = false;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        rec.onresult = (e) => {
+            let final = '';
+            let interim = '';
+            for (let i = 0; i < e.results.length; i++) {
+                if (e.results[i].isFinal) {
+                    final += e.results[i][0].transcript;
+                } else {
+                    interim += e.results[i][0].transcript;
+                }
+            }
+            if (final) vocabConfirmedText += (vocabConfirmedText ? ' ' : '') + final;
+            const display = vocabConfirmedText + (interim ? (vocabConfirmedText ? ' ' : '') + interim : '');
+            vocabState.userSaid = display;
+            const el = document.getElementById('vocabLiveText');
+            if (el) el.textContent = display || '聞き取り中...';
+        };
+
+        rec.onend = () => {
+            if (vocabMicRecording) {
+                try { rec.start(); } catch {}
+            }
+        };
+
+        rec.onerror = (e) => {
+            if (e.error === 'not-allowed') alert('マイクが許可されていません');
+        };
+
+        vocabRecognition = rec;
+        vocabMicRecording = true;
+        rec.start();
+        const btn = document.getElementById('vocabMicBtn');
+        if (btn) btn.classList.add('recording');
+        const el = document.getElementById('vocabLiveText');
+        if (el) el.textContent = '聞き取り中...';
+    }
+
+    function submitVocabAnswer() {
+        const vs = vocabState;
+        const text = (vocabConfirmedText || vs.userSaid).trim();
+        if (!text) {
+            renderVocabCard();
+            return;
+        }
+        vs.userSaid = text;
+        const word = vs.words[vs.index];
+        const result = checkVocabAnswer(text, word);
+        vs.result = result.match;
+        vs.revealed = true;
+        vs.total++;
+        if (result.match) vs.correct++;
+        recordActivity('vocab', 1);
+        updateStreakDisplay();
+        renderVocabCard();
+    }
+
+    function skipVocab() {
         vocabState.revealed = true;
+        vocabState.result = null; // スキップは正解でも不正解でもない
+        vocabState.total++;
         renderVocabCard();
     }
 
@@ -753,14 +1061,19 @@ Output ONLY in this exact JSON format, no other text:
         if (vs.index < vs.words.length - 1) {
             vs.index++;
             vs.revealed = false;
+            vs.result = null;
+            vs.userSaid = '';
         } else {
-            // シャッフルしてやり直し
             for (let i = vs.words.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [vs.words[i], vs.words[j]] = [vs.words[j], vs.words[i]];
             }
             vs.index = 0;
             vs.revealed = false;
+            vs.result = null;
+            vs.userSaid = '';
+            vs.correct = 0;
+            vs.total = 0;
         }
         renderVocabCard();
     }
@@ -769,6 +1082,8 @@ Output ONLY in this exact JSON format, no other text:
         if (vocabState.index > 0) {
             vocabState.index--;
             vocabState.revealed = false;
+            vocabState.result = null;
+            vocabState.userSaid = '';
             renderVocabCard();
         }
     }
@@ -884,6 +1199,7 @@ Output ONLY in this exact JSON format, no other text:
                 <h1>英会話アプリ</h1>
                 <button onclick="openSettings()">設定</button>
             </div>
+            <div id="streakArea">${renderStreakBar()}</div>
             <div class="chat-area" id="chatArea"></div>
             <div class="input-area">
                 <button id="micBtn" class="mic-btn" onclick="toggleMic()">&#127908;</button>
@@ -1001,6 +1317,8 @@ Output ONLY in this exact JSON format, no other text:
                     aiDiv.appendChild(speakBtn);
 
                     messages.push({ role: 'assistant', content: fullReply });
+                    recordActivity(settings.mode, 1);
+                    updateStreakDisplay();
 
                     // 自動音声再生
                     speak(fullReply, settings.voiceLang, settings.speed);
