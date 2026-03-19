@@ -847,29 +847,38 @@ Output ONLY in this exact JSON format, no other text:
     // --- 音声入力 (Web Speech API) ---
     let recognition = null;
     let isRecording = false;
+    let confirmedText = '';  // 確定済みテキスト（再開前の分を保持）
 
     function initRecognition() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) return null;
         const rec = new SpeechRecognition();
-        rec.continuous = true;
+        rec.continuous = false;
         rec.interimResults = true;
         rec.lang = settings.micLang;
 
         rec.onresult = (e) => {
             const input = document.getElementById('userInput');
             if (!input) return;
-            let text = '';
+            let final = '';
+            let interim = '';
             for (let i = 0; i < e.results.length; i++) {
-                text += e.results[i][0].transcript;
+                if (e.results[i].isFinal) {
+                    final += e.results[i][0].transcript;
+                } else {
+                    interim += e.results[i][0].transcript;
+                }
             }
-            input.value = text;
+            if (final) {
+                confirmedText += (confirmedText ? ' ' : '') + final;
+            }
+            input.value = confirmedText + (interim ? (confirmedText ? ' ' : '') + interim : '');
             input.style.height = 'auto';
             input.style.height = Math.min(input.scrollHeight, 100) + 'px';
         };
 
         rec.onend = () => {
-            // continuous=trueでもブラウザが停止する場合がある → 手動停止でなければ再開
+            // 手動停止でなければ自動再開（確定テキストは保持される）
             if (isRecording) {
                 try { rec.start(); } catch {}
                 return;
@@ -908,6 +917,7 @@ Output ONLY in this exact JSON format, no other text:
         }
 
         // 録音開始
+        confirmedText = '';
         recognition = initRecognition();
         if (!recognition) {
             alert('お使いのブラウザは音声入力に対応していません。');
