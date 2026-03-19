@@ -7,6 +7,7 @@
     <meta name="theme-color" content="#1a1a2e">
     <title>英会話アプリ</title>
     <link rel="manifest" href="manifest.json">
+    <script src="vocab.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -245,6 +246,103 @@
             font-size: 15px;
             cursor: pointer;
         }
+
+        /* 単語学習モード */
+        .vocab-categories {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px;
+        }
+        .vocab-cat-btn {
+            padding: 8px 14px;
+            border-radius: 16px;
+            border: 1px solid #444;
+            background: #1a1a2e;
+            color: #ccc;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .vocab-cat-btn.active {
+            background: #e94560;
+            border-color: #e94560;
+            color: white;
+        }
+        .vocab-card {
+            background: #2a2a4a;
+            border-radius: 16px;
+            padding: 20px;
+            margin: 12px 16px;
+            text-align: center;
+        }
+        .vocab-ja {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 16px;
+            color: #fff;
+        }
+        .vocab-hidden {
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .vocab-reveal-btn {
+            padding: 10px 28px;
+            background: #0f3460;
+            border: none;
+            color: #ccc;
+            border-radius: 20px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+        .vocab-en-list {
+            text-align: left;
+            margin-top: 8px;
+        }
+        .vocab-en-section {
+            margin-bottom: 12px;
+        }
+        .vocab-en-section .section-label {
+            font-size: 12px;
+            color: #e94560;
+            margin-bottom: 4px;
+            font-weight: bold;
+        }
+        .vocab-en-item {
+            padding: 6px 0;
+            font-size: 15px;
+            color: #ddd;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .vocab-en-item .speak-icon {
+            cursor: pointer;
+            font-size: 16px;
+            color: #888;
+        }
+        .vocab-nav {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            padding: 12px;
+        }
+        .vocab-nav button {
+            padding: 10px 24px;
+            border-radius: 20px;
+            border: none;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .vocab-nav .btn-prev { background: #333; color: #ccc; }
+        .vocab-nav .btn-next { background: #e94560; color: white; }
+        .vocab-progress {
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            padding: 4px;
+        }
     </style>
 </head>
 <body>
@@ -263,6 +361,7 @@
                 <option value="english">英会話レッスン</option>
                 <option value="translate">英訳練習</option>
                 <option value="drama">英語劇</option>
+                <option value="vocab">単語学習</option>
             </select>
             <label>音声入力の言語</label>
             <select id="s-mic-lang">
@@ -567,6 +666,113 @@ Output ONLY in this exact JSON format, no other text:
         startDrama();
     }
 
+    // --- 単語学習モード ---
+    let vocabState = null; // { category, words, index, revealed }
+
+    function initVocab() {
+        const chatArea = document.getElementById('chatArea');
+        const categories = Object.keys(VOCAB_DATA);
+
+        let catBtns = categories.map(cat =>
+            `<button class="vocab-cat-btn" onclick="selectVocabCategory('${cat}')">${cat}</button>`
+        ).join('');
+
+        chatArea.innerHTML = `
+            <div style="padding:16px;text-align:center;color:#aaa;">カテゴリを選んでください</div>
+            <div class="vocab-categories">${catBtns}</div>`;
+    }
+
+    function selectVocabCategory(cat) {
+        const words = [...VOCAB_DATA[cat]];
+        // シャッフル
+        for (let i = words.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [words[i], words[j]] = [words[j], words[i]];
+        }
+        vocabState = { category: cat, words, index: 0, revealed: false };
+        renderVocabCard();
+    }
+
+    function renderVocabCard() {
+        const vs = vocabState;
+        const word = vs.words[vs.index];
+        const chatArea = document.getElementById('chatArea');
+
+        // カテゴリボタン
+        const categories = Object.keys(VOCAB_DATA);
+        let catBtns = categories.map(cat =>
+            `<button class="vocab-cat-btn ${cat === vs.category ? 'active' : ''}" onclick="selectVocabCategory('${cat}')">${cat}</button>`
+        ).join('');
+
+        let answerHtml;
+        if (vs.revealed) {
+            answerHtml = `
+                <div class="vocab-en-list">
+                    <div class="vocab-en-section">
+                        <div class="section-label">シンプルな表現</div>
+                        ${word.en.map(e => `<div class="vocab-en-item">
+                            <span class="speak-icon" onclick="speak('${e.replace(/'/g, "\\'")}', 'en-US', ${settings.speed})">&#128264;</span>
+                            ${escapeHtml(e)}
+                        </div>`).join('')}
+                    </div>
+                    <div class="vocab-en-section">
+                        <div class="section-label">ネイティブ表現</div>
+                        ${word.native.map(e => `<div class="vocab-en-item">
+                            <span class="speak-icon" onclick="speak('${e.replace(/'/g, "\\'")}', 'en-US', ${settings.speed})">&#128264;</span>
+                            ${escapeHtml(e)}
+                        </div>`).join('')}
+                    </div>
+                </div>`;
+        } else {
+            answerHtml = `
+                <div class="vocab-hidden">
+                    <button class="vocab-reveal-btn" onclick="revealVocab()">答えを見る</button>
+                </div>`;
+        }
+
+        chatArea.innerHTML = `
+            <div class="vocab-categories">${catBtns}</div>
+            <div class="vocab-progress">${vs.index + 1} / ${vs.words.length}</div>
+            <div class="vocab-card">
+                <div class="vocab-ja">${escapeHtml(word.ja)}</div>
+                ${answerHtml}
+            </div>
+            <div class="vocab-nav">
+                <button class="btn-prev" onclick="vocabPrev()" ${vs.index === 0 ? 'disabled' : ''}>&#9664; 前</button>
+                <button class="btn-next" onclick="vocabNext()">${vs.index < vs.words.length - 1 ? '次 &#9654;' : 'もう一度 &#8635;'}</button>
+            </div>`;
+    }
+
+    function revealVocab() {
+        vocabState.revealed = true;
+        renderVocabCard();
+    }
+
+    function vocabNext() {
+        const vs = vocabState;
+        if (vs.index < vs.words.length - 1) {
+            vs.index++;
+            vs.revealed = false;
+        } else {
+            // シャッフルしてやり直し
+            for (let i = vs.words.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [vs.words[i], vs.words[j]] = [vs.words[j], vs.words[i]];
+            }
+            vs.index = 0;
+            vs.revealed = false;
+        }
+        renderVocabCard();
+    }
+
+    function vocabPrev() {
+        if (vocabState.index > 0) {
+            vocabState.index--;
+            vocabState.revealed = false;
+            renderVocabCard();
+        }
+    }
+
     // --- 音声合成 ---
     function speak(text, lang, speed) {
         return new Promise((resolve) => {
@@ -695,9 +901,11 @@ Output ONLY in this exact JSON format, no other text:
         }
         chatArea.scrollTop = chatArea.scrollHeight;
 
-        // ドラマモード初期化
+        // 特殊モード初期化
         if (settings.mode === 'drama' && !dramaState) {
             startDrama();
+        } else if (settings.mode === 'vocab') {
+            initVocab();
         }
 
         // textarea自動リサイズ
@@ -836,6 +1044,7 @@ Output ONLY in this exact JSON format, no other text:
         // モード変更時は会話リセット
         messages = [];
         dramaState = null;
+        vocabState = null;
         closeSettings();
         render();
     }
