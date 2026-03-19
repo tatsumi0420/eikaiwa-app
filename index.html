@@ -421,6 +421,24 @@
             border-radius: 3px;
             background: #2a2a4a;
         }
+        .praise-btn {
+            padding: 4px 12px;
+            border-radius: 12px;
+            border: none;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 8px;
+        }
+        .praise-btn.active {
+            background: #e94560;
+            color: white;
+            animation: pulse 2s infinite;
+        }
+        .praise-btn.disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+        }
         .streak-day.done {
             background: #52b788;
         }
@@ -750,18 +768,15 @@ Output ONLY in this exact JSON format, no other text:
     function recordActivity(mode, count) {
         const log = loadStudyLog();
         const today = getToday();
-        const isFirstToday = !log[today];
         if (!log[today]) log[today] = {};
         if (!log[today][mode]) log[today][mode] = 0;
         log[today][mode] += count;
         saveStudyLog(log);
+    }
 
-        // 初回学習時、または5問ごとに褒める
-        const total = Object.values(log[today]).reduce((a, b) => a + b, 0);
-        if (isFirstToday || total % 5 === 0) {
-            praiseShown = false; // 褒め解禁
-            setTimeout(() => showPraise(), 1500);
-        }
+    function onPraiseBtn() {
+        praiseShown = false;
+        showPraise();
     }
 
     function getStreak() {
@@ -808,12 +823,19 @@ Output ONLY in this exact JSON format, no other text:
             days += `<div class="streak-day ${done} ${isToday}" title="${key}"></div>`;
         }
 
+        const todayLog = log[getToday()];
+        const totalToday = todayLog ? Object.values(todayLog).reduce((a, b) => a + b, 0) : 0;
+        const canPraise = totalToday >= 1;
+        const praiseClass = canPraise ? 'active' : 'disabled';
+        const praiseOnclick = canPraise ? 'onclick="onPraiseBtn()"' : '';
+
         return `
             <div class="streak-bar">
                 <span class="streak-fire">&#128293;</span>
                 <span class="streak-count">${streak}</span>日連続
                 <span style="margin-left:8px;color:#666;">|</span>
-                <span style="margin-left:8px;color:#666;">今日: ${log[getToday()] ? Object.values(log[getToday()]).reduce((a,b)=>a+b,0) + '問' : '未学習'}</span>
+                <span style="margin-left:8px;color:#666;">今日: ${totalToday ? totalToday + '問' : '未学習'}</span>
+                <button class="praise-btn ${praiseClass}" ${praiseOnclick}>♡ 褒めて</button>
             </div>
             <div class="streak-calendar">${days}</div>`;
     }
