@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>英会話アプリ</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ヘッダー */
+        .header {
+            padding: 12px 16px;
+            background: #16213e;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #0f3460;
+        }
+        .header h1 { font-size: 18px; }
+        .header button {
+            background: none;
+            border: 1px solid #555;
+            color: #ccc;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        /* チャットエリア */
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .msg {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 16px;
+            line-height: 1.5;
+            font-size: 15px;
+            word-break: break-word;
+        }
+        .msg.user {
+            align-self: flex-end;
+            background: #0f3460;
+            border-bottom-right-radius: 4px;
+        }
+        .msg.ai {
+            align-self: flex-start;
+            background: #2a2a4a;
+            border-bottom-left-radius: 4px;
+        }
+        .msg .label {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .msg.ai .speak-btn {
+            display: inline-block;
+            margin-top: 6px;
+            background: none;
+            border: 1px solid #555;
+            color: #aaa;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .typing {
+            align-self: flex-start;
+            color: #888;
+            font-style: italic;
+            font-size: 14px;
+        }
+
+        /* 入力エリア */
+        .input-area {
+            padding: 12px 16px;
+            background: #16213e;
+            border-top: 1px solid #0f3460;
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+        .input-area textarea {
+            flex: 1;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            color: #eee;
+            padding: 10px 14px;
+            border-radius: 20px;
+            font-size: 15px;
+            resize: none;
+            max-height: 100px;
+            font-family: inherit;
+        }
+        .input-area textarea::placeholder { color: #666; }
+        .input-area button {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: none;
+            background: #e94560;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .input-area button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        .input-area .mic-btn {
+            background: #333;
+        }
+        .input-area .mic-btn.recording {
+            background: #e94560;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        /* 設定モーダル */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #16213e;
+            border-radius: 16px;
+            padding: 24px;
+            width: 90%;
+            max-width: 400px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal h2 { margin-bottom: 16px; font-size: 18px; }
+        .modal label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #aaa;
+        }
+        .modal input, .modal select, .modal textarea {
+            width: 100%;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            color: #eee;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 16px;
+            font-family: inherit;
+        }
+        .modal .btn-row {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .modal .btn-row button {
+            padding: 8px 20px;
+            border-radius: 8px;
+            border: none;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .modal .btn-save { background: #e94560; color: white; }
+        .modal .btn-cancel { background: #333; color: #ccc; }
+
+        /* 初期設定画面 */
+        .setup {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 英語劇モード */
+        .drama-script {
+            background: #0f3460;
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        .drama-script .drama-title {
+            font-size: 13px;
+            color: #e94560;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .drama-line {
+            padding: 4px 0;
+        }
+        .drama-line .role {
+            font-weight: bold;
+            color: #aaa;
+        }
+        .drama-line.my-role .role {
+            color: #e94560;
+        }
+        .drama-line.my-role {
+            color: #fff;
+        }
+        .drama-status {
+            text-align: center;
+            padding: 8px;
+            font-size: 13px;
+            color: #888;
+        }
+        .drama-next-btn {
+            display: block;
+            margin: 12px auto;
+            padding: 10px 24px;
+            background: #e94560;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <!-- 初期設定 or チャット画面 -->
+    <div id="app"></div>
+
+    <!-- 設定モーダル -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <h2>設定</h2>
+            <label>Groq APIキー</label>
+            <input type="password" id="s-apikey" placeholder="gsk_...">
+            <label>モード</label>
+            <select id="s-mode">
+                <option value="free">フリートーク（日本語）</option>
+                <option value="english">英会話レッスン</option>
+                <option value="translate">英訳練習</option>
+                <option value="drama">英語劇</option>
+            </select>
+            <label>音声入力の言語</label>
+            <select id="s-mic-lang">
+                <option value="ja-JP">日本語</option>
+                <option value="en-US">英語 (US)</option>
+                <option value="en-GB">英語 (UK)</option>
+            </select>
+            <label>音声出力の言語</label>
+            <select id="s-voice-lang">
+                <option value="ja-JP">日本語</option>
+                <option value="en-US">英語 (US)</option>
+                <option value="en-GB">英語 (UK)</option>
+            </select>
+            <label>音声スピード</label>
+            <input type="range" id="s-speed" min="0.5" max="2.0" step="0.1" value="1.0">
+            <span id="s-speed-label">1.0x</span>
+            <div class="btn-row">
+                <button class="btn-cancel" onclick="doLogout()" style="color:#e94560;">ログアウト</button>
+                <button class="btn-cancel" onclick="closeSettings()">キャンセル</button>
+                <button class="btn-save" onclick="saveSettings()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // --- パスワード認証 ---
+    const PASSWORD_HASH = '00fcb2d718c2116664250ce295b3d7d73ed9285609d6fef71233da70f637bd65';
+
+    async function hashPassword(pw) {
+        const data = new TextEncoder().encode(pw);
+        const buf = await crypto.subtle.digest('SHA-256', data);
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function isAuthenticated() {
+        return localStorage.getItem('eikaiwa_auth') === 'ok';
+    }
+
+    async function doLogin() {
+        const pw = document.getElementById('login-pw').value;
+        const hash = await hashPassword(pw);
+        if (hash === PASSWORD_HASH) {
+            localStorage.setItem('eikaiwa_auth', 'ok');
+            render();
+        } else {
+            document.getElementById('login-error').textContent = 'パスワードが違います';
+        }
+    }
+
+    function renderLogin(app) {
+        app.innerHTML = `
+            <div class="setup">
+                <div class="modal" style="position:static;">
+                    <h2>英会話アプリ</h2>
+                    <label>パスワード</label>
+                    <input type="password" id="login-pw" placeholder="パスワードを入力"
+                        onkeydown="if(event.key==='Enter')doLogin()">
+                    <p id="login-error" style="color:#e94560;font-size:13px;margin:-10px 0 10px;"></p>
+                    <div class="btn-row">
+                        <button class="btn-save" onclick="doLogin()">ログイン</button>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    // --- 設定管理 ---
+    const DEFAULT_SETTINGS = {
+        apiKey: '',
+        mode: 'english',
+        micLang: 'en-US',
+        voiceLang: 'en-US',
+        speed: 1.0,
+    };
+
+    function loadSettings() {
+        try {
+            return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('eikaiwa_settings')) };
+        } catch { return { ...DEFAULT_SETTINGS }; }
+    }
+    function saveSettingsToStorage(s) {
+        localStorage.setItem('eikaiwa_settings', JSON.stringify(s));
+    }
+
+    let settings = loadSettings();
+    let messages = [];
+    let isGenerating = false;
+
+    // --- システムプロンプト ---
+    function getSystemPrompt(mode) {
+        switch (mode) {
+            case 'free':
+                return 'あなたは日本語で会話する親切なアシスタントです。自然で簡潔な日本語で返答してください。返答は2〜3文程度にしてください。';
+            case 'english':
+                return `You are a friendly English conversation partner.
+Rules:
+- Speak in simple, natural English only. Do not add any translations or annotations.
+- Keep responses to 2-3 sentences.
+- If the user makes a grammar mistake, gently correct it and continue the conversation.
+- Occasionally ask follow-up questions to keep the conversation going.`;
+            case 'translate':
+                return `You are an English translation tutor.
+Rules:
+- The user will write a sentence in Japanese.
+- Provide the natural English translation.
+- Then briefly explain any key grammar or vocabulary points.
+- Keep explanations concise (1-2 sentences).
+- Respond in a mix of English and Japanese for clarity.`;
+            case 'drama':
+                return ''; // ドラマモードは専用ロジックで処理
+            default:
+                return '';
+        }
+    }
+
+    // --- 英語劇モード ---
+    let dramaState = null; // { script: [...], userRole: 'A'|'B', step: 0 }
+
+    async function callGroqNonStream(msgs) {
+        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${settings.apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',
+                messages: msgs,
+                stream: false,
+            }),
+        });
+        if (!resp.ok) throw new Error(`API Error ${resp.status}`);
+        const data = await resp.json();
+        return data.choices[0].message.content;
+    }
+
+    async function startDrama() {
+        const chatArea = document.getElementById('chatArea');
+        chatArea.innerHTML = '<div class="drama-status">台本を生成中...</div>';
+
+        try {
+            const scriptText = await callGroqNonStream([
+                { role: 'system', content: `You are a script writer. Generate a short casual Japanese conversation between two friends (A and B). Exactly 4 lines (A, B, A, B). Use casual/informal Japanese (タメ口), like real friends talking.
+
+Output ONLY in this exact JSON format, no other text:
+{"lines":[{"role":"A","ja":"..."},{"role":"B","ja":"..."},{"role":"A","ja":"..."},{"role":"B","ja":"..."}],"scene":"...場面の説明..."}` },
+                { role: 'user', content: 'Generate a new conversation script between friends. Pick a random casual scenario (making weekend plans, talking about a movie, complaining about work, recommending a restaurant, sharing gossip, gaming, etc). Use natural casual Japanese like close friends would speak.' }
+            ]);
+
+            // JSONを抽出
+            const jsonMatch = scriptText.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) throw new Error('台本の生成に失敗しました');
+            const script = JSON.parse(jsonMatch[0]);
+
+            // 先行/後攻をランダムに決定
+            const userRole = Math.random() < 0.5 ? 'A' : 'B';
+
+            dramaState = {
+                script: script.lines,
+                scene: script.scene,
+                userRole: userRole,
+                step: 0,
+                results: [],
+            };
+
+            renderDramaScript();
+        } catch (err) {
+            chatArea.innerHTML = `<div class="drama-status">[エラー] ${err.message}</div>
+                <button class="drama-next-btn" onclick="startDrama()">リトライ</button>`;
+        }
+    }
+
+    function renderDramaScript() {
+        const chatArea = document.getElementById('chatArea');
+        const ds = dramaState;
+
+        let linesHtml = '';
+        for (const line of ds.script) {
+            const isMine = line.role === ds.userRole;
+            linesHtml += `<div class="drama-line ${isMine ? 'my-role' : ''}">
+                <span class="role">${line.role}${isMine ? ' (あなた)' : ' (AI)'}:</span> ${escapeHtml(line.ja)}
+            </div>`;
+        }
+
+        chatArea.innerHTML = `
+            <div class="drama-script">
+                <div class="drama-title">台本 - ${escapeHtml(ds.scene || '日常会話')}</div>
+                ${linesHtml}
+            </div>
+            <div class="drama-status">あなたは <b>${ds.userRole}</b> 役です。この台本を英語で演じましょう！</div>
+        `;
+
+        // 最初のターンを開始
+        proceedDramaTurn();
+    }
+
+    async function proceedDramaTurn() {
+        const ds = dramaState;
+        if (ds.step >= ds.script.length) {
+            // 全ターン完了 → 結果表示
+            showDramaResults();
+            return;
+        }
+
+        const currentLine = ds.script[ds.step];
+        const chatArea = document.getElementById('chatArea');
+
+        if (currentLine.role === ds.userRole) {
+            // ユーザーのターン
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'drama-status';
+            statusDiv.innerHTML = `<b>あなたのターン (${currentLine.role}):</b> 「${escapeHtml(currentLine.ja)}」を英語で言ってください`;
+            chatArea.appendChild(statusDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            // ユーザーの入力を待つ（sendMessageで処理）
+        } else {
+            // AIのターン → 自動で英訳して発話
+            const aiEnglish = await callGroqNonStream([
+                { role: 'system', content: 'Translate the following Japanese sentence to natural English. Output ONLY the English translation, nothing else.' },
+                { role: 'user', content: currentLine.ja }
+            ]);
+
+            const div = document.createElement('div');
+            div.className = 'msg ai';
+            div.innerHTML = `<div class="label">AI (${currentLine.role})</div><div class="text">${escapeHtml(aiEnglish)}</div>
+                <button class="speak-btn" onclick="speakText(this)">&#128264; 再生</button>`;
+            chatArea.appendChild(div);
+            chatArea.scrollTop = chatArea.scrollHeight;
+
+            speak(aiEnglish, 'en-US', settings.speed);
+
+            ds.step++;
+            // 少し待ってから次のターン
+            setTimeout(() => proceedDramaTurn(), 1500);
+        }
+    }
+
+    async function handleDramaInput(text) {
+        const ds = dramaState;
+        const currentLine = ds.script[ds.step];
+        const chatArea = document.getElementById('chatArea');
+
+        // ユーザーの発言を表示
+        appendMessage('user', text);
+
+        // AIに評価させる
+        isGenerating = true;
+        document.getElementById('sendBtn').disabled = true;
+
+        try {
+            const evaluation = await callGroqNonStream([
+                { role: 'system', content: `あなたは英語の先生です。生徒の英語が元の日本語の意味を伝えられているか評価してください。
+
+元の日本語: 「${currentLine.ja}」
+生徒の発言: 「${text}」
+
+重要なルール:
+- 句読点（カンマ、ピリオド等）の有無は無視してください。音声入力のため句読点がないのは正常です。
+- 大文字小文字の違いも無視してください。
+- 意味が伝わるかどうかだけで判定してください。
+
+以下の形式で日本語で回答してください:
+模範解答: (自然な英語訳)
+判定: 「通じる」または「通じない」
+コメント: (通じる場合は一言褒める。通じない場合はなぜ通じないのかを具体的に日本語で説明。1〜2文で。)` },
+                { role: 'user', content: text }
+            ]);
+
+            const evalDiv = document.createElement('div');
+            evalDiv.className = 'msg ai';
+            evalDiv.innerHTML = `<div class="label">評価</div><div class="text">${escapeHtml(evaluation)}</div>`;
+            chatArea.appendChild(evalDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+
+            ds.results.push({ ja: currentLine.ja, userSaid: text, evaluation });
+
+        } catch (err) {
+            appendMessage('ai', `[エラー] ${err.message}`);
+        }
+
+        isGenerating = false;
+        document.getElementById('sendBtn').disabled = false;
+
+        ds.step++;
+        setTimeout(() => proceedDramaTurn(), 1500);
+    }
+
+    function showDramaResults() {
+        const chatArea = document.getElementById('chatArea');
+        const div = document.createElement('div');
+        div.className = 'drama-status';
+        div.innerHTML = `<b>お疲れ様でした！</b><br><br>
+            <button class="drama-next-btn" onclick="startNewDrama()">次の台本へ</button>`;
+        chatArea.appendChild(div);
+        chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    function startNewDrama() {
+        dramaState = null;
+        messages = [];
+        const chatArea = document.getElementById('chatArea');
+        chatArea.innerHTML = '';
+        startDrama();
+    }
+
+    // --- 音声合成 ---
+    function speak(text, lang, speed) {
+        return new Promise((resolve) => {
+            if (!('speechSynthesis' in window)) { resolve(); return; }
+            window.speechSynthesis.cancel();
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = lang || 'en-US';
+            utter.rate = speed || 1.0;
+
+            // 適切な音声を選択
+            const voices = window.speechSynthesis.getVoices();
+            const match = voices.find(v => v.lang.startsWith(lang.substring(0, 2)));
+            if (match) utter.voice = match;
+
+            utter.onend = resolve;
+            utter.onerror = resolve;
+            window.speechSynthesis.speak(utter);
+        });
+    }
+
+    // --- Groq API ---
+    async function callGroq(msgs) {
+        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${settings.apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',
+                messages: msgs,
+                stream: true,
+            }),
+        });
+
+        if (!resp.ok) {
+            const err = await resp.text();
+            throw new Error(`API Error ${resp.status}: ${err}`);
+        }
+        return resp.body.getReader();
+    }
+
+    async function streamResponse(reader, onToken, onDone) {
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6).trim();
+                if (data === '[DONE]') { onDone(); return; }
+                try {
+                    const json = JSON.parse(data);
+                    const token = json.choices?.[0]?.delta?.content || '';
+                    if (token) onToken(token);
+                } catch {}
+            }
+        }
+        onDone();
+    }
+
+    // --- UI ---
+    function render() {
+        const app = document.getElementById('app');
+        if (!isAuthenticated()) {
+            renderLogin(app);
+        } else if (!settings.apiKey) {
+            renderSetup(app);
+        } else {
+            renderChat(app);
+        }
+    }
+
+    function renderSetup(app) {
+        app.innerHTML = `
+            <div class="setup">
+                <div class="modal" style="position:static;">
+                    <h2>英会話アプリ 初期設定</h2>
+                    <label>Groq APIキー</label>
+                    <input type="password" id="setup-key" placeholder="gsk_...">
+                    <p style="font-size:12px;color:#888;margin:-10px 0 16px;">
+                        <a href="https://console.groq.com" target="_blank" style="color:#e94560;">console.groq.com</a> で無料取得
+                    </p>
+                    <div class="btn-row">
+                        <button class="btn-save" onclick="doSetup()">開始</button>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    function doSetup() {
+        const key = document.getElementById('setup-key').value.trim();
+        if (!key) { alert('APIキーを入力してください'); return; }
+        settings.apiKey = key;
+        saveSettingsToStorage(settings);
+        render();
+    }
+
+    function renderChat(app) {
+        app.innerHTML = `
+            <div class="header">
+                <h1>英会話アプリ</h1>
+                <button onclick="openSettings()">設定</button>
+            </div>
+            <div class="chat-area" id="chatArea"></div>
+            <div class="input-area">
+                <button id="micBtn" class="mic-btn" onclick="toggleMic()">&#127908;</button>
+                <textarea id="userInput" rows="1" placeholder="メッセージを入力..."
+                    onkeydown="handleKey(event)"></textarea>
+                <button id="sendBtn" onclick="sendMessage()">&#9654;</button>
+            </div>`;
+
+        // 既存メッセージを再描画
+        const chatArea = document.getElementById('chatArea');
+        for (const msg of messages) {
+            if (msg.role === 'user' || msg.role === 'assistant') {
+                appendMessage(msg.role === 'user' ? 'user' : 'ai', msg.content);
+            }
+        }
+        chatArea.scrollTop = chatArea.scrollHeight;
+
+        // ドラマモード初期化
+        if (settings.mode === 'drama' && !dramaState) {
+            startDrama();
+        }
+
+        // textarea自動リサイズ
+        const ta = document.getElementById('userInput');
+        ta.addEventListener('input', () => {
+            ta.style.height = 'auto';
+            ta.style.height = Math.min(ta.scrollHeight, 100) + 'px';
+        });
+    }
+
+    function appendMessage(role, text) {
+        const chatArea = document.getElementById('chatArea');
+        const div = document.createElement('div');
+        div.className = `msg ${role}`;
+        const label = role === 'user' ? 'あなた' : 'AI';
+        let speakBtn = '';
+        if (role === 'ai') {
+            speakBtn = `<button class="speak-btn" onclick="speakText(this)">&#128264; 再生</button>`;
+        }
+        div.innerHTML = `<div class="label">${label}</div><div class="text">${escapeHtml(text)}</div>${speakBtn}`;
+        chatArea.appendChild(div);
+        chatArea.scrollTop = chatArea.scrollHeight;
+        return div;
+    }
+
+    function escapeHtml(s) {
+        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    }
+
+    function speakText(btn) {
+        const text = btn.parentElement.querySelector('.text').textContent;
+        speak(text, settings.voiceLang, settings.speed);
+    }
+
+    function handleKey(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    }
+
+    async function sendMessage() {
+        if (isGenerating) return;
+        const input = document.getElementById('userInput');
+        const text = input.value.trim();
+        if (!text) return;
+
+        input.value = '';
+        input.style.height = 'auto';
+
+        // ドラマモードの場合は専用ハンドラへ
+        if (settings.mode === 'drama' && dramaState) {
+            handleDramaInput(text);
+            return;
+        }
+
+        // ユーザーメッセージ追加
+        appendMessage('user', text);
+
+        // システムプロンプト初回設定
+        if (messages.length === 0) {
+            messages.push({ role: 'system', content: getSystemPrompt(settings.mode) });
+        }
+        messages.push({ role: 'user', content: text });
+
+        // AI返信生成
+        isGenerating = true;
+        document.getElementById('sendBtn').disabled = true;
+
+        const chatArea = document.getElementById('chatArea');
+        const aiDiv = document.createElement('div');
+        aiDiv.className = 'msg ai';
+        aiDiv.innerHTML = '<div class="label">AI</div><div class="text"></div>';
+        chatArea.appendChild(aiDiv);
+        const textDiv = aiDiv.querySelector('.text');
+
+        let fullReply = '';
+
+        try {
+            const reader = await callGroq(messages);
+            await streamResponse(reader,
+                (token) => {
+                    fullReply += token;
+                    textDiv.innerHTML = escapeHtml(fullReply);
+                    chatArea.scrollTop = chatArea.scrollHeight;
+                },
+                () => {
+                    // 完了時: 再生ボタン追加 & 自動音声再生
+                    const speakBtn = document.createElement('button');
+                    speakBtn.className = 'speak-btn';
+                    speakBtn.innerHTML = '&#128264; 再生';
+                    speakBtn.onclick = function() { speakText(this); };
+                    aiDiv.appendChild(speakBtn);
+
+                    messages.push({ role: 'assistant', content: fullReply });
+
+                    // 自動音声再生
+                    speak(fullReply, settings.voiceLang, settings.speed);
+                }
+            );
+        } catch (err) {
+            textDiv.textContent = `[エラー] ${err.message}`;
+        }
+
+        isGenerating = false;
+        document.getElementById('sendBtn').disabled = false;
+    }
+
+    // --- 設定モーダル ---
+    function openSettings() {
+        document.getElementById('s-apikey').value = settings.apiKey;
+        document.getElementById('s-mode').value = settings.mode;
+        document.getElementById('s-mic-lang').value = settings.micLang;
+        document.getElementById('s-voice-lang').value = settings.voiceLang;
+        document.getElementById('s-speed').value = settings.speed;
+        document.getElementById('s-speed-label').textContent = settings.speed + 'x';
+        document.getElementById('settingsModal').classList.add('active');
+    }
+    function closeSettings() {
+        document.getElementById('settingsModal').classList.remove('active');
+    }
+    function doLogout() {
+        localStorage.removeItem('eikaiwa_auth');
+        closeSettings();
+        messages = [];
+        render();
+    }
+    function saveSettings() {
+        settings.apiKey = document.getElementById('s-apikey').value.trim();
+        settings.mode = document.getElementById('s-mode').value;
+        settings.micLang = document.getElementById('s-mic-lang').value;
+        settings.voiceLang = document.getElementById('s-voice-lang').value;
+        settings.speed = parseFloat(document.getElementById('s-speed').value);
+        saveSettingsToStorage(settings);
+
+        // モード変更時は会話リセット
+        messages = [];
+        dramaState = null;
+        closeSettings();
+        render();
+    }
+
+    document.getElementById('s-speed').addEventListener('input', (e) => {
+        document.getElementById('s-speed-label').textContent = e.target.value + 'x';
+    });
+
+    // --- 音声入力 (Web Speech API) ---
+    let recognition = null;
+    let isRecording = false;
+
+    function initRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) return null;
+        const rec = new SpeechRecognition();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = settings.micLang;
+
+        rec.onresult = (e) => {
+            const input = document.getElementById('userInput');
+            if (!input) return;
+            let text = '';
+            for (let i = 0; i < e.results.length; i++) {
+                text += e.results[i][0].transcript;
+            }
+            input.value = text;
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 100) + 'px';
+        };
+
+        rec.onend = () => {
+            // continuous=trueでもブラウザが停止する場合がある → 手動停止でなければ再開
+            if (isRecording) {
+                try { rec.start(); } catch {}
+                return;
+            }
+            const micBtn = document.getElementById('micBtn');
+            if (micBtn) micBtn.classList.remove('recording');
+        };
+
+        rec.onerror = (e) => {
+            isRecording = false;
+            const micBtn = document.getElementById('micBtn');
+            if (micBtn) micBtn.classList.remove('recording');
+            if (e.error === 'not-allowed') {
+                alert('マイクの使用が許可されていません。ブラウザの設定を確認してください。');
+            }
+        };
+
+        return rec;
+    }
+
+    function toggleMic() {
+        if (isGenerating) return;
+
+        if (isRecording) {
+            // 手動停止 → 送信
+            isRecording = false;
+            if (recognition) recognition.stop();
+            const micBtn = document.getElementById('micBtn');
+            if (micBtn) micBtn.classList.remove('recording');
+            // テキストがあれば送信
+            const input = document.getElementById('userInput');
+            if (input && input.value.trim()) {
+                sendMessage();
+            }
+            return;
+        }
+
+        // 録音開始
+        recognition = initRecognition();
+        if (!recognition) {
+            alert('お使いのブラウザは音声入力に対応していません。');
+            return;
+        }
+        recognition.lang = settings.micLang;
+        isRecording = true;
+        const micBtn = document.getElementById('micBtn');
+        if (micBtn) micBtn.classList.add('recording');
+        recognition.start();
+    }
+
+    // 音声リスト読み込み（非同期）
+    if ('speechSynthesis' in window) {
+        speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+    }
+
+    // 初期描画
+    render();
+    </script>
+</body>
+</html>
