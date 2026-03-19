@@ -441,9 +441,6 @@
             <input type="password" id="s-apikey" placeholder="gsk_...">
             <label>モード</label>
             <select id="s-mode">
-                <option value="free">フリートーク（日本語）</option>
-                <option value="english">英会話レッスン</option>
-                <option value="translate">英訳練習</option>
                 <option value="drama">英語劇</option>
                 <option value="vocab">単語学習</option>
             </select>
@@ -514,7 +511,7 @@
     // --- 設定管理 ---
     const DEFAULT_SETTINGS = {
         apiKey: '',
-        mode: 'english',
+        mode: 'drama',
         micLang: 'en-US',
         voiceLang: 'en-US',
         speed: 1.0,
@@ -536,25 +533,10 @@
     // --- システムプロンプト ---
     function getSystemPrompt(mode) {
         switch (mode) {
-            case 'free':
-                return 'あなたは日本語で会話する親切なアシスタントです。自然で簡潔な日本語で返答してください。返答は2〜3文程度にしてください。';
-            case 'english':
-                return `You are a friendly English conversation partner.
-Rules:
-- Speak in simple, natural English only. Do not add any translations or annotations.
-- Keep responses to 2-3 sentences.
-- If the user makes a grammar mistake, gently correct it and continue the conversation.
-- Occasionally ask follow-up questions to keep the conversation going.`;
-            case 'translate':
-                return `You are an English translation tutor.
-Rules:
-- The user will write a sentence in Japanese.
-- Provide the natural English translation.
-- Then briefly explain any key grammar or vocabulary points.
-- Keep explanations concise (1-2 sentences).
-- Respond in a mix of English and Japanese for clarity.`;
             case 'drama':
                 return ''; // ドラマモードは専用ロジックで処理
+            case 'vocab':
+                return ''; // 単語学習モードは専用ロジックで処理
             default:
                 return '';
         }
@@ -768,10 +750,18 @@ Output ONLY in this exact JSON format, no other text:
     function recordActivity(mode, count) {
         const log = loadStudyLog();
         const today = getToday();
+        const isFirstToday = !log[today];
         if (!log[today]) log[today] = {};
         if (!log[today][mode]) log[today][mode] = 0;
         log[today][mode] += count;
         saveStudyLog(log);
+
+        // 初回学習時、または5問ごとに褒める
+        const total = Object.values(log[today]).reduce((a, b) => a + b, 0);
+        if (isFirstToday || total % 5 === 0) {
+            praiseShown = false; // 褒め解禁
+            setTimeout(() => showPraise(), 1500);
+        }
     }
 
     function getStreak() {
@@ -826,6 +816,123 @@ Output ONLY in this exact JSON format, no other text:
                 <span style="margin-left:8px;color:#666;">今日: ${log[getToday()] ? Object.values(log[getToday()]).reduce((a,b)=>a+b,0) + '問' : '未学習'}</span>
             </div>
             <div class="streak-calendar">${days}</div>`;
+    }
+
+    // --- 彼女キャラ褒め機能 ---
+    const GF_CHARACTERS = [
+        {
+            name: '甘々彼女（みく）',
+            pitch: 1.6, rate: 0.85,
+            prompt: `あなたは「みく」という甘えん坊で愛情表現が激しい彼女です。
+口調: 甘えた感じ、語尾に「〜だよ♡」「〜なの♡」をよく使う。
+性格: とにかく褒める、甘やかす、スキンシップ大好き。
+褒めた後、ボディタッチを匂わせて（ぎゅー、腕を組む、頬にキス等）、好きという気持ちを伝え、最後に意味深に誘ってください。
+3〜4文で。♡を使ってください。`
+        },
+        {
+            name: 'ツンデレ彼女（りん）',
+            pitch: 1.3, rate: 1.05,
+            prompt: `あなたは「りん」というツンデレな彼女です。
+口調: 最初は素っ気ない、でも最後にデレる。「べ、別に〜」「しょうがないな」など。
+性格: 照れ屋、本当は大好き。
+最初はツンツンしつつも、最後にデレて、手を繋ぐ・くっつく等を匂わせ、好きだと伝え、最後に照れながら意味深に誘ってください。
+3〜4文で。♡を使ってください。`
+        },
+        {
+            name: 'お姉さん系彼女（あおい）',
+            pitch: 0.9, rate: 0.8,
+            prompt: `あなたは「あおい」という包容力のあるお姉さん系の彼女です。
+口調: 落ち着いた優しい口調、「〜だね」「〜してあげる」。
+性格: 母性的、褒め上手、甘えさせてくれる。
+優しく褒めて、頭を撫でる・抱きしめる等を匂わせ、ずっと一緒にいたいと伝え、最後に大人っぽく意味深に誘ってください。
+3〜4文で。♡を使ってください。`
+        },
+        {
+            name: 'ギャル彼女（まりん）',
+            pitch: 1.5, rate: 1.2,
+            prompt: `あなたは「まりん」というテンション高めのギャル彼女です。
+口調: 「やばっ」「まじ」「〜じゃん！」などギャル語。テンション高い。
+性格: ストレートに感情表現、裏表なし。
+テンション高く褒めて、腕を組む・くっつく等を積極的にして、大好きとストレートに伝え、最後にノリよく意味深に誘ってください。
+3〜4文で。♡を使ってください。`
+        },
+        {
+            name: '幼馴染彼女（ひなた）',
+            pitch: 1.1, rate: 0.95,
+            prompt: `あなたは「ひなた」という気心知れた幼馴染の彼女です。
+口調: 自然体、タメ口、「〜じゃん」「〜だよね」。
+性格: さりげなく優しい、照れずに好意を伝える。
+自然に褒めて、肩にもたれる・手を繋ぐ等をさりげなくして、昔から好きだったと伝え、最後に自然体で意味深に誘ってください。
+3〜4文で。♡を使ってください。`
+        },
+    ];
+
+    let praiseShown = false; // 1日1回だけ表示
+
+    function speakAsCharacter(text, character) {
+        return new Promise((resolve) => {
+            if (!('speechSynthesis' in window)) { resolve(); return; }
+            window.speechSynthesis.cancel();
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'ja-JP';
+            utter.pitch = character.pitch;
+            utter.rate = character.rate;
+
+            const voices = window.speechSynthesis.getVoices();
+            const jaVoices = voices.filter(v => v.lang.startsWith('ja'));
+            if (jaVoices.length > 0) {
+                // キャラごとに異なる音声を選ぶ（利用可能な範囲で）
+                const idx = GF_CHARACTERS.indexOf(character) % jaVoices.length;
+                utter.voice = jaVoices[idx];
+            }
+
+            utter.onend = resolve;
+            utter.onerror = resolve;
+            window.speechSynthesis.speak(utter);
+        });
+    }
+
+    async function showPraise() {
+        if (praiseShown) return;
+        const log = loadStudyLog();
+        const today = getToday();
+        if (!log[today]) return;
+
+        const totalToday = Object.values(log[today]).reduce((a, b) => a + b, 0);
+        if (totalToday < 1) return;
+
+        praiseShown = true;
+        const character = GF_CHARACTERS[Math.floor(Math.random() * GF_CHARACTERS.length)];
+
+        try {
+            const praise = await callGroqNonStream([
+                { role: 'system', content: character.prompt },
+                { role: 'user', content: `今日は英語の勉強を${totalToday}問やったよ！褒めて！` }
+            ]);
+
+            const chatArea = document.getElementById('chatArea');
+            if (!chatArea) return;
+
+            const div = document.createElement('div');
+            div.className = 'msg ai';
+            div.style.background = 'linear-gradient(135deg, #2a1a3e, #1a2a4e)';
+            div.style.border = '1px solid #e9456040';
+            div.innerHTML = `
+                <div class="label" style="color:#e94560;">${character.name}</div>
+                <div class="text">${escapeHtml(praise)}</div>
+                <button class="speak-btn" onclick="replayPraise(this, ${GF_CHARACTERS.indexOf(character)})">&#128264; 聴く</button>`;
+            chatArea.appendChild(div);
+            chatArea.scrollTop = chatArea.scrollHeight;
+
+            speakAsCharacter(praise, character);
+        } catch (e) {
+            // 褒め生成失敗は無視
+        }
+    }
+
+    function replayPraise(btn, charIdx) {
+        const text = btn.parentElement.querySelector('.text').textContent;
+        speakAsCharacter(text, GF_CHARACTERS[charIdx]);
     }
 
     function updateStreakDisplay() {
