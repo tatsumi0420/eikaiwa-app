@@ -322,6 +322,20 @@
             font-size: 16px;
             color: #888;
         }
+        .vocab-youglish {
+            display: block;
+            text-align: center;
+            margin: 12px 0 4px;
+        }
+        .vocab-youglish a {
+            display: inline-block;
+            padding: 8px 20px;
+            background: #0f3460;
+            color: #7eb8f0;
+            border-radius: 16px;
+            text-decoration: none;
+            font-size: 13px;
+        }
         .vocab-nav {
             display: flex;
             justify-content: center;
@@ -962,6 +976,9 @@ Output ONLY in this exact JSON format, no other text:
                             <span class="speak-icon" onclick="speak('${e.replace(/'/g, "\\'")}', 'en-US', ${settings.speed})">&#128264;</span>
                             ${escapeHtml(e)}
                         </div>`).join('')}
+                    </div>
+                    <div class="vocab-youglish">
+                        <a href="https://youglish.com/pronounce/${encodeURIComponent(word.youglish || word.en[0])}/english" target="_blank">&#127909; YouGlishで聴く</a>
                     </div>
                 </div>`;
         }
