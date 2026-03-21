@@ -343,49 +343,43 @@
             color: #666;
             padding: 4px;
         }
-        .vocab-mic-area {
+        .vocab-okng {
             display: flex;
             justify-content: center;
-            gap: 12px;
-            margin: 12px 0;
-            align-items: center;
+            gap: 16px;
+            margin: 16px 0 8px;
         }
-        .vocab-mic-btn {
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
+        .vocab-okng button {
+            padding: 12px 32px;
+            border-radius: 20px;
             border: none;
-            background: #333;
-            color: white;
-            font-size: 24px;
-            cursor: pointer;
-        }
-        .vocab-mic-btn.recording {
-            background: #e94560;
-            animation: pulse 1s infinite;
-        }
-        .vocab-user-said {
-            font-size: 14px;
-            color: #aaa;
-            text-align: center;
-            min-height: 20px;
-            margin: 8px 0;
-        }
-        .vocab-result {
-            text-align: center;
-            padding: 12px;
-            border-radius: 12px;
-            margin: 8px 0;
             font-size: 16px;
             font-weight: bold;
+            cursor: pointer;
         }
-        .vocab-result.correct {
+        .vocab-okng .btn-ok {
             background: #1b4332;
             color: #52b788;
         }
-        .vocab-result.incorrect {
+        .vocab-okng .btn-ng {
             background: #4a1525;
             color: #e94560;
+        }
+        .vocab-srs-info {
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            padding: 4px;
+        }
+        .vocab-due-badge {
+            display: inline-block;
+            background: #e94560;
+            color: white;
+            border-radius: 10px;
+            padding: 1px 7px;
+            font-size: 11px;
+            margin-left: 4px;
+            vertical-align: middle;
         }
         .vocab-score {
             text-align: center;
@@ -818,89 +812,139 @@ Output ONLY in this exact JSON format, no other text:
         if (el) el.innerHTML = renderStreakBar();
     }
 
+    // --- SRS（忘却曲線） ---
+    const SRS_INTERVALS = [0, 1, 3, 7, 14, 30, 60]; // 日数
+
+    function loadSRS() {
+        try { return JSON.parse(localStorage.getItem('eikaiwa_srs')) || {}; } catch { return {}; }
+    }
+    function saveSRS(data) {
+        localStorage.setItem('eikaiwa_srs', JSON.stringify(data));
+    }
+    function getSRSKey(cat, ja) {
+        return cat + '::' + ja;
+    }
+    function getSRSEntry(cat, ja) {
+        const data = loadSRS();
+        return data[getSRSKey(cat, ja)] || { streak: 0, nextReview: 0 };
+    }
+    function updateSRS(cat, ja, ok) {
+        const data = loadSRS();
+        const key = getSRSKey(cat, ja);
+        const entry = data[key] || { streak: 0, nextReview: 0 };
+        const now = Date.now();
+        if (ok) {
+            entry.streak = Math.min(entry.streak + 1, SRS_INTERVALS.length - 1);
+        } else {
+            entry.streak = 0;
+        }
+        const days = SRS_INTERVALS[entry.streak];
+        entry.nextReview = now + days * 24 * 60 * 60 * 1000;
+        data[key] = entry;
+        saveSRS(data);
+    }
+    function isDue(cat, ja) {
+        const entry = getSRSEntry(cat, ja);
+        return Date.now() >= entry.nextReview;
+    }
+    function getDueCount(cat) {
+        const words = VOCAB_DATA[cat];
+        if (!words) return 0;
+        return words.filter(w => isDue(cat, w.ja)).length;
+    }
+    function getAllDueWords() {
+        const due = [];
+        for (const cat of Object.keys(VOCAB_DATA)) {
+            for (const word of VOCAB_DATA[cat]) {
+                if (isDue(cat, word.ja)) {
+                    due.push({ ...word, _cat: cat });
+                }
+            }
+        }
+        // 復習期限が早い順にソート
+        const srs = loadSRS();
+        due.sort((a, b) => {
+            const ea = srs[getSRSKey(a._cat, a.ja)] || { nextReview: 0 };
+            const eb = srs[getSRSKey(b._cat, b.ja)] || { nextReview: 0 };
+            return ea.nextReview - eb.nextReview;
+        });
+        return due;
+    }
+    function getSRSLabel(cat, ja) {
+        const entry = getSRSEntry(cat, ja);
+        if (entry.streak === 0 && entry.nextReview === 0) return '新規';
+        const days = SRS_INTERVALS[entry.streak];
+        if (days === 0) return '今すぐ';
+        if (days === 1) return '1日後';
+        return days + '日後';
+    }
+
     // --- 単語学習モード ---
     let vocabState = null;
-    let vocabMicRecording = false;
-    let vocabRecognition = null;
-    let vocabConfirmedText = '';
 
     function initVocab() {
         const chatArea = document.getElementById('chatArea');
         const categories = Object.keys(VOCAB_DATA);
+        const allDue = getAllDueWords().length;
 
-        let catBtns = categories.map(cat =>
-            `<button class="vocab-cat-btn" onclick="selectVocabCategory('${cat}')">${cat}</button>`
-        ).join('');
+        let catBtns = categories.map(cat => {
+            const due = getDueCount(cat);
+            const badge = due > 0 ? `<span class="vocab-due-badge">${due}</span>` : '';
+            return `<button class="vocab-cat-btn" onclick="selectVocabCategory('${cat}')">${cat}${badge}</button>`;
+        }).join('');
+
+        const reviewBtn = allDue > 0
+            ? `<button class="vocab-cat-btn" style="background:#e94560;border-color:#e94560;color:white;" onclick="startReview()">復習 <span class="vocab-due-badge" style="background:white;color:#e94560;">${allDue}</span></button>`
+            : `<button class="vocab-cat-btn" style="opacity:0.5;cursor:default;">復習なし</button>`;
 
         chatArea.innerHTML = `
             <div style="padding:16px;text-align:center;color:#aaa;">カテゴリを選んでください</div>
-            <div class="vocab-categories">${catBtns}</div>`;
+            <div class="vocab-categories">${reviewBtn}${catBtns}</div>`;
     }
 
     function selectVocabCategory(cat) {
         const words = [...VOCAB_DATA[cat]];
-        for (let i = words.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [words[i], words[j]] = [words[j], words[i]];
-        }
-        vocabState = { category: cat, words, index: 0, revealed: false, userSaid: '', result: null, correct: 0, total: 0 };
+        // 復習期限順にソート（期限切れ＝due が先、新規が先）
+        const srs = loadSRS();
+        words.sort((a, b) => {
+            const ea = srs[getSRSKey(cat, a.ja)] || { nextReview: 0 };
+            const eb = srs[getSRSKey(cat, b.ja)] || { nextReview: 0 };
+            return ea.nextReview - eb.nextReview;
+        });
+        vocabState = { category: cat, words, index: 0, revealed: false, answered: false, isReview: false };
         renderVocabCard();
     }
 
-    function normalize(s) {
-        return s.toLowerCase().replace(/[.,!?'";\-:]/g, '').replace(/\s+/g, ' ').trim();
-    }
-
-    function checkVocabAnswer(userText, word) {
-        const norm = normalize(userText);
-        const allAnswers = [...word.en, ...word.native];
-        // 完全一致
-        for (const ans of allAnswers) {
-            if (normalize(ans) === norm) return { match: true, exact: true, matched: ans };
-        }
-        // 部分一致（ユーザーの発言が答えを含む、または答えがユーザーの発言を含む）
-        for (const ans of allAnswers) {
-            const normAns = normalize(ans);
-            if (norm.includes(normAns) || normAns.includes(norm)) {
-                return { match: true, exact: false, matched: ans };
-            }
-        }
-        // 単語レベルの類似度チェック
-        const userWords = new Set(norm.split(' '));
-        for (const ans of allAnswers) {
-            const ansWords = new Set(normalize(ans).split(' '));
-            const common = [...userWords].filter(w => ansWords.has(w) && w.length > 2);
-            if (common.length >= Math.min(ansWords.size, userWords.size) * 0.6) {
-                return { match: true, exact: false, matched: ans };
-            }
-        }
-        return { match: false };
+    function startReview() {
+        const due = getAllDueWords();
+        if (due.length === 0) return;
+        vocabState = { category: '復習', words: due, index: 0, revealed: false, answered: false, isReview: true };
+        renderVocabCard();
     }
 
     function renderVocabCard() {
         const vs = vocabState;
         const word = vs.words[vs.index];
         const chatArea = document.getElementById('chatArea');
+        const cat = vs.isReview ? (word._cat || vs.category) : vs.category;
 
         const categories = Object.keys(VOCAB_DATA);
-        let catBtns = categories.map(cat =>
-            `<button class="vocab-cat-btn ${cat === vs.category ? 'active' : ''}" onclick="selectVocabCategory('${cat}')">${cat}</button>`
-        ).join('');
+        let catBtns = categories.map(c => {
+            const due = getDueCount(c);
+            const badge = due > 0 ? `<span class="vocab-due-badge">${due}</span>` : '';
+            const active = !vs.isReview && c === vs.category ? 'active' : '';
+            return `<button class="vocab-cat-btn ${active}" onclick="selectVocabCategory('${c}')">${c}${badge}</button>`;
+        }).join('');
 
-        // 結果表示
-        let resultHtml = '';
-        if (vs.result !== null) {
-            if (vs.result) {
-                resultHtml = `<div class="vocab-result correct">&#9989; 正解！</div>`;
-            } else {
-                resultHtml = `<div class="vocab-result incorrect">&#10060; 不正解</div>`;
-            }
-            if (vs.userSaid) {
-                resultHtml += `<div class="vocab-user-said">あなたの発言: "${escapeHtml(vs.userSaid)}"</div>`;
-            }
-        }
+        const allDue = getAllDueWords().length;
+        const reviewActive = vs.isReview ? 'active' : '';
+        const reviewBtn = `<button class="vocab-cat-btn ${reviewActive}" style="${vs.isReview ? 'background:#e94560;border-color:#e94560;color:white;' : ''}" onclick="startReview()">復習 ${allDue > 0 ? `<span class="vocab-due-badge" style="${vs.isReview ? 'background:white;color:#e94560;' : ''}">${allDue}</span>` : ''}</button>`;
 
-        // 答え表示（正解/不正解後、またはスキップ時）
+        // SRS情報
+        const srsLabel = getSRSLabel(cat, word.ja);
+        const srsInfo = `<div class="vocab-srs-info">次の復習: ${srsLabel}</div>`;
+
+        // 答え表示
         let answerHtml = '';
         if (vs.revealed) {
             answerHtml = `
@@ -922,123 +966,66 @@ Output ONLY in this exact JSON format, no other text:
                 </div>`;
         }
 
-        // マイク＆スキップ（未回答時のみ）
-        let inputHtml = '';
-        if (vs.result === null) {
-            inputHtml = `
-                <div class="vocab-mic-area">
-                    <button class="vocab-mic-btn" id="vocabMicBtn" onclick="toggleVocabMic()">&#127908;</button>
-                </div>
-                <div class="vocab-user-said" id="vocabLiveText">${vs.userSaid ? escapeHtml(vs.userSaid) : 'マイクボタンを押して英語で言ってみよう'}</div>
-                <div style="text-align:center;margin-top:8px;">
-                    <button class="vocab-reveal-btn" onclick="skipVocab()" style="font-size:12px;padding:6px 16px;">スキップ（答えを見る）</button>
+        // OK/NG or 答えを見るボタン
+        let actionHtml = '';
+        if (!vs.revealed) {
+            actionHtml = `
+                <div style="text-align:center;margin-top:16px;">
+                    <button class="vocab-reveal-btn" onclick="revealVocab()">答えを見る</button>
+                </div>`;
+        } else if (!vs.answered) {
+            actionHtml = `
+                <div class="vocab-okng">
+                    <button class="btn-ng" onclick="vocabNG()">NG</button>
+                    <button class="btn-ok" onclick="vocabOK()">OK</button>
                 </div>`;
         }
 
         chatArea.innerHTML = `
-            <div class="vocab-categories">${catBtns}</div>
-            <div class="vocab-score">正解: ${vs.correct} / ${vs.total} | ${vs.index + 1} / ${vs.words.length}</div>
+            <div class="vocab-categories">${reviewBtn}${catBtns}</div>
+            <div class="vocab-score">${vs.isReview ? '復習モード | ' : ''}${vs.index + 1} / ${vs.words.length}</div>
             <div class="vocab-card">
                 <div class="vocab-ja">${escapeHtml(word.ja)}</div>
-                ${inputHtml}
-                ${resultHtml}
+                ${actionHtml}
                 ${answerHtml}
+                ${vs.revealed ? srsInfo : ''}
             </div>
             <div class="vocab-nav">
                 <button class="btn-prev" onclick="vocabPrev()" ${vs.index === 0 ? 'disabled' : ''}>&#9664; 前</button>
-                <button class="btn-next" onclick="vocabNext()">${vs.index < vs.words.length - 1 ? '次 &#9654;' : 'もう一度 &#8635;'}</button>
+                <button class="btn-next" onclick="vocabNext()">${vs.index < vs.words.length - 1 ? '次 &#9654;' : '完了 &#10003;'}</button>
             </div>`;
-
-        // 録音中なら赤くする
-        if (vocabMicRecording) {
-            const btn = document.getElementById('vocabMicBtn');
-            if (btn) btn.classList.add('recording');
-        }
     }
 
-    function toggleVocabMic() {
-        if (vocabMicRecording) {
-            // 停止 → 判定
-            vocabMicRecording = false;
-            if (vocabRecognition) vocabRecognition.stop();
-            const btn = document.getElementById('vocabMicBtn');
-            if (btn) btn.classList.remove('recording');
-            // 判定
-            submitVocabAnswer();
-            return;
-        }
-
-        // 開始
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) { alert('音声入力に対応していません'); return; }
-
-        vocabConfirmedText = '';
-        vocabState.userSaid = '';
-        const rec = new SpeechRecognition();
-        rec.continuous = false;
-        rec.interimResults = true;
-        rec.lang = 'en-US';
-
-        rec.onresult = (e) => {
-            let final = '';
-            let interim = '';
-            for (let i = 0; i < e.results.length; i++) {
-                if (e.results[i].isFinal) {
-                    final += e.results[i][0].transcript;
-                } else {
-                    interim += e.results[i][0].transcript;
-                }
-            }
-            if (final) vocabConfirmedText += (vocabConfirmedText ? ' ' : '') + final;
-            const display = vocabConfirmedText + (interim ? (vocabConfirmedText ? ' ' : '') + interim : '');
-            vocabState.userSaid = display;
-            const el = document.getElementById('vocabLiveText');
-            if (el) el.textContent = display || '聞き取り中...';
-        };
-
-        rec.onend = () => {
-            if (vocabMicRecording) {
-                try { rec.start(); } catch {}
-            }
-        };
-
-        rec.onerror = (e) => {
-            if (e.error === 'not-allowed') alert('マイクが許可されていません');
-        };
-
-        vocabRecognition = rec;
-        vocabMicRecording = true;
-        rec.start();
-        const btn = document.getElementById('vocabMicBtn');
-        if (btn) btn.classList.add('recording');
-        const el = document.getElementById('vocabLiveText');
-        if (el) el.textContent = '聞き取り中...';
+    function revealVocab() {
+        vocabState.revealed = true;
+        renderVocabCard();
     }
 
-    function submitVocabAnswer() {
+    function vocabOK() {
         const vs = vocabState;
-        const text = (vocabConfirmedText || vs.userSaid).trim();
-        if (!text) {
-            renderVocabCard();
-            return;
-        }
-        vs.userSaid = text;
         const word = vs.words[vs.index];
-        const result = checkVocabAnswer(text, word);
-        vs.result = result.match;
-        vs.revealed = true;
-        vs.total++;
-        if (result.match) vs.correct++;
+        const cat = vs.isReview ? (word._cat || vs.category) : vs.category;
+        updateSRS(cat, word.ja, true);
+        vs.answered = true;
         recordActivity('vocab', 1);
         updateStreakDisplay();
         renderVocabCard();
+        // 自動で次へ
+        setTimeout(() => vocabNext(), 500);
     }
 
-    function skipVocab() {
-        vocabState.revealed = true;
-        vocabState.result = null; // スキップは正解でも不正解でもない
-        vocabState.total++;
+    function vocabNG() {
+        const vs = vocabState;
+        const word = vs.words[vs.index];
+        const cat = vs.isReview ? (word._cat || vs.category) : vs.category;
+        updateSRS(cat, word.ja, false);
+        vs.answered = true;
+        recordActivity('vocab', 1);
+        updateStreakDisplay();
+        // NGの場合、リストの最後に再追加
+        vs.words.push({ ...word, _cat: cat });
         renderVocabCard();
+        setTimeout(() => vocabNext(), 500);
     }
 
     function vocabNext() {
@@ -1046,19 +1033,12 @@ Output ONLY in this exact JSON format, no other text:
         if (vs.index < vs.words.length - 1) {
             vs.index++;
             vs.revealed = false;
-            vs.result = null;
-            vs.userSaid = '';
+            vs.answered = false;
         } else {
-            for (let i = vs.words.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [vs.words[i], vs.words[j]] = [vs.words[j], vs.words[i]];
-            }
-            vs.index = 0;
-            vs.revealed = false;
-            vs.result = null;
-            vs.userSaid = '';
-            vs.correct = 0;
-            vs.total = 0;
+            // 全問完了 → カテゴリ選択に戻る
+            vocabState = null;
+            initVocab();
+            return;
         }
         renderVocabCard();
     }
@@ -1067,8 +1047,7 @@ Output ONLY in this exact JSON format, no other text:
         if (vocabState.index > 0) {
             vocabState.index--;
             vocabState.revealed = false;
-            vocabState.result = null;
-            vocabState.userSaid = '';
+            vocabState.answered = false;
             renderVocabCard();
         }
     }
