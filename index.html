@@ -322,28 +322,35 @@
             font-size: 16px;
             color: #888;
         }
-        .vocab-key-sentence {
-            text-align: center;
-            margin: 12px 0;
-            padding: 10px 16px;
+        .vocab-way {
             background: #16213e;
             border-radius: 12px;
-            border-left: 3px solid #e94560;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            text-align: left;
         }
-        .vocab-key-sentence .key-label {
-            font-size: 11px;
-            color: #e94560;
+        .vocab-way-en {
+            font-size: 16px;
+            color: #fff;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .vocab-way-key {
+            display: inline-block;
+            background: #e94560;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 13px;
             font-weight: bold;
             margin-bottom: 4px;
         }
-        .vocab-key-sentence .key-text {
-            font-size: 17px;
-            color: #fff;
-        }
-        .vocab-youglish-embed {
-            margin: 12px 0 4px;
-            border-radius: 12px;
-            overflow: hidden;
+        .vocab-way-explanation {
+            font-size: 13px;
+            color: #aaa;
+            line-height: 1.5;
         }
         .vocab-nav {
             display: flex;
@@ -445,7 +452,7 @@
             border: 1px solid #e94560;
         }
     </style>
-    <script src="https://youglish.com/public/emb/widget.js"></script>
+
 </head>
 <body>
     <!-- 初期設定 or チャット画面 -->
@@ -971,34 +978,15 @@ Output ONLY in this exact JSON format, no other text:
         // 答え表示
         let answerHtml = '';
         if (vs.revealed) {
-            const keyPhrase = word.youglish || word.en[0];
-            answerHtml = `
-                <div class="vocab-key-sentence">
-                    <div class="key-label">キーセンテンス</div>
-                    <div class="key-text">
-                        <span class="speak-icon" onclick="speak('${keyPhrase.replace(/'/g, "\\'")}', 'en-US', ${settings.speed})" style="cursor:pointer;margin-right:6px;">&#128264;</span>
-                        ${escapeHtml(keyPhrase)}
+            answerHtml = word.ways.map(w => `
+                <div class="vocab-way">
+                    <div class="vocab-way-en">
+                        <span class="speak-icon" onclick="speak('${w.en.replace(/'/g, "\\'")}', 'en-US', ${settings.speed})" style="cursor:pointer;">&#128264;</span>
+                        ${escapeHtml(w.en)}
                     </div>
-                </div>
-                <div class="vocab-en-list">
-                    <div class="vocab-en-section">
-                        <div class="section-label">シンプルな表現</div>
-                        ${word.en.map(e => `<div class="vocab-en-item">
-                            <span class="speak-icon" onclick="speak('${e.replace(/'/g, "\\'")}', 'en-US', ${settings.speed})">&#128264;</span>
-                            ${escapeHtml(e)}
-                        </div>`).join('')}
-                    </div>
-                    <div class="vocab-en-section">
-                        <div class="section-label">ネイティブ表現</div>
-                        ${word.native.map(e => `<div class="vocab-en-item">
-                            <span class="speak-icon" onclick="speak('${e.replace(/'/g, "\\'")}', 'en-US', ${settings.speed})">&#128264;</span>
-                            ${escapeHtml(e)}
-                        </div>`).join('')}
-                    </div>
-                </div>
-                <div class="vocab-youglish-embed" id="yg-container">
-                    <div id="yg-widget"></div>
-                </div>`;
+                    <div class="vocab-way-key">${escapeHtml(w.key)}</div>
+                    <div class="vocab-way-explanation">${escapeHtml(w.explanation)}</div>
+                </div>`).join('');
         }
 
         // OK/NG or 答えを見るボタン
@@ -1031,43 +1019,9 @@ Output ONLY in this exact JSON format, no other text:
             </div>`;
     }
 
-    let ygWidget = null;
-
     function revealVocab() {
         vocabState.revealed = true;
         renderVocabCard();
-        // YouGlishウィジェット初期化
-        initYouGlish();
-    }
-
-    function initYouGlish() {
-        const vs = vocabState;
-        if (!vs) return;
-        const word = vs.words[vs.index];
-        const query = word.youglish || word.en[0];
-        const container = document.getElementById('yg-widget');
-        if (!container) return;
-
-        // 既存ウィジェットを破壊
-        if (ygWidget) {
-            try { ygWidget.close(); } catch {}
-            ygWidget = null;
-        }
-
-        try {
-            ygWidget = new YG.Widget('yg-widget', {
-                width: Math.min(window.innerWidth - 64, 400),
-                components: 14,
-                events: {
-                    'onFetchDone': function(e) {},
-                    'onVideoChange': function(e) {},
-                    'onCaptionConvert': function(e) {}
-                }
-            });
-            ygWidget.fetch(query, 'english');
-        } catch (e) {
-            container.innerHTML = '<div style="text-align:center;color:#666;font-size:12px;padding:8px;">YouGlish読み込みエラー</div>';
-        }
     }
 
     function vocabOK() {
