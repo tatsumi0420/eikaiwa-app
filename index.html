@@ -588,17 +588,64 @@
         return data.choices[0].message.content;
     }
 
+    // 英語劇用：学習済みキーフレーズを取得
+    function getDramaKeyPhrases(maxCount = 4) {
+        const srs = loadSRS();
+        const now = Date.now();
+        const learned = [];
+
+        // 優先: 学習済み・復習待ち（streak≧1 かつ nextReview > 現在時刻）
+        for (const cat of Object.keys(VOCAB_DATA)) {
+            for (const word of VOCAB_DATA[cat]) {
+                const entry = srs[getSRSKey(cat, word.ja)];
+                if (entry && entry.streak >= 1 && entry.nextReview > now) {
+                    const keys = word.ways.map(w => w.key);
+                    learned.push(...keys);
+                }
+            }
+        }
+
+        if (learned.length > 0) {
+            // シャッフルして最大maxCount個返す
+            for (let i = learned.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [learned[i], learned[j]] = [learned[j], learned[i]];
+            }
+            return learned.slice(0, maxCount);
+        }
+
+        // フォールバック: VOCAB_DATA全体からランダム選出
+        const all = [];
+        for (const cat of Object.keys(VOCAB_DATA)) {
+            for (const word of VOCAB_DATA[cat]) {
+                const keys = word.ways.map(w => w.key);
+                all.push(...keys);
+            }
+        }
+        for (let i = all.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [all[i], all[j]] = [all[j], all[i]];
+        }
+        return all.slice(0, maxCount);
+    }
+
     async function startDrama() {
         const chatArea = document.getElementById('chatArea');
         chatArea.innerHTML = '<div class="drama-status">台本を生成中...</div>';
 
         try {
+            const phrases = getDramaKeyPhrases(4);
+            const phraseList = phrases.map(p => `- ${p}`).join('\n');
+
             const scriptText = await callGroqNonStream([
                 { role: 'system', content: `You are a script writer. Generate a short casual Japanese conversation between two friends (A and B). Exactly 4 lines (A, B, A, B). Use casual/informal Japanese (タメ口), like real friends talking.
 
+The conversation should be designed so that when translated to English, the following key phrases would be naturally used:
+${phraseList}
+
 Output ONLY in this exact JSON format, no other text:
 {"lines":[{"role":"A","ja":"..."},{"role":"B","ja":"..."},{"role":"A","ja":"..."},{"role":"B","ja":"..."}],"scene":"...場面の説明..."}` },
-                { role: 'user', content: 'Generate a new conversation script between friends. Pick a random casual scenario (making weekend plans, talking about a movie, complaining about work, recommending a restaurant, sharing gossip, gaming, etc). Use natural casual Japanese like close friends would speak.' }
+                { role: 'user', content: 'Generate a new conversation script between friends that naturally incorporates the specified key phrases when expressed in English. Use natural casual Japanese like close friends would speak.' }
             ]);
 
             // JSONを抽出
