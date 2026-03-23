@@ -367,6 +367,16 @@
         }
         .vocab-nav .btn-prev { background: #333; color: #ccc; }
         .vocab-nav .btn-next { background: #e94560; color: white; }
+        .vocab-chat-area {
+            padding: 8px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .vocab-chat-area .msg {
+            font-size: 13px;
+            padding: 8px 12px;
+        }
         .vocab-progress {
             text-align: center;
             font-size: 12px;
@@ -1063,7 +1073,24 @@ Output ONLY in this exact JSON format, no other text:
             <div class="vocab-nav">
                 <button class="btn-prev" onclick="vocabPrev()" ${vs.index === 0 ? 'disabled' : ''}>&#9664; 前</button>
                 <button class="btn-next" onclick="vocabNext()">${vs.index < vs.words.length - 1 ? '次 &#9654;' : '完了 &#10003;'}</button>
-            </div>`;
+            </div>
+            <div id="vocabChatArea" class="vocab-chat-area"></div>`;
+
+        // チャット履歴を再描画
+        const vocabChatArea = document.getElementById('vocabChatArea');
+        for (const msg of vocabChatMessages) {
+            if (msg.role === 'user') {
+                const div = document.createElement('div');
+                div.className = 'msg user';
+                div.innerHTML = `<div class="label">You</div><div class="text">${escapeHtml(msg.content)}</div>`;
+                vocabChatArea.appendChild(div);
+            } else if (msg.role === 'assistant') {
+                const div = document.createElement('div');
+                div.className = 'msg ai';
+                div.innerHTML = `<div class="label">AI</div><div class="text">${escapeHtml(msg.content)}</div>`;
+                vocabChatArea.appendChild(div);
+            }
+        }
     }
 
     function revealVocab() {
@@ -1100,6 +1127,7 @@ Output ONLY in this exact JSON format, no other text:
 
     function vocabNext() {
         const vs = vocabState;
+        clearVocabChat();
         if (vs.index < vs.words.length - 1) {
             vs.index++;
             vs.revealed = false;
@@ -1114,12 +1142,88 @@ Output ONLY in this exact JSON format, no other text:
     }
 
     function vocabPrev() {
+        clearVocabChat();
         if (vocabState.index > 0) {
             vocabState.index--;
             vocabState.revealed = false;
             vocabState.answered = false;
             renderVocabCard();
         }
+    }
+
+    // --- 単語学習チャット ---
+    let vocabChatMessages = [];
+
+    async function handleVocabChat(text) {
+        const vs = vocabState;
+        const word = vs.words[vs.index];
+        const cat = vs.isReview ? (word._cat || vs.category) : vs.category;
+
+        // チャットエリアを取得（なければ作成）
+        let vocabChatArea = document.getElementById('vocabChatArea');
+        if (!vocabChatArea) return;
+
+        // ユーザーメッセージ表示
+        const userDiv = document.createElement('div');
+        userDiv.className = 'msg user';
+        userDiv.innerHTML = `<div class="label">You</div><div class="text">${escapeHtml(text)}</div>`;
+        vocabChatArea.appendChild(userDiv);
+        vocabChatArea.scrollTop = vocabChatArea.scrollHeight;
+
+        // システムプロンプト初回設定
+        if (vocabChatMessages.length === 0) {
+            const waysText = word.ways.map((w, i) =>
+                `${i + 1}. "${w.en}" (キーフレーズ: ${w.key}) — ${w.explanation}`
+            ).join('\n');
+            vocabChatMessages.push({
+                role: 'system',
+                content: `あなたは英語学習のアシスタントです。ユーザーが学習中の例文について質問しています。日本語で簡潔に回答してください。
+
+現在の例文:
+日本語: 「${word.ja}」
+カテゴリ: ${cat}
+
+英語表現:
+${waysText}`
+            });
+        }
+        vocabChatMessages.push({ role: 'user', content: text });
+
+        // AI返信生成
+        isGenerating = true;
+        document.getElementById('sendBtn').disabled = true;
+
+        const aiDiv = document.createElement('div');
+        aiDiv.className = 'msg ai';
+        aiDiv.innerHTML = '<div class="label">AI</div><div class="text"></div>';
+        vocabChatArea.appendChild(aiDiv);
+        const textDiv = aiDiv.querySelector('.text');
+
+        let fullReply = '';
+        try {
+            const reader = await callGroq(vocabChatMessages);
+            await streamResponse(reader,
+                (token) => {
+                    fullReply += token;
+                    textDiv.innerHTML = escapeHtml(fullReply);
+                    vocabChatArea.scrollTop = vocabChatArea.scrollHeight;
+                },
+                () => {
+                    vocabChatMessages.push({ role: 'assistant', content: fullReply });
+                }
+            );
+        } catch (err) {
+            textDiv.textContent = `[エラー] ${err.message}`;
+        }
+
+        isGenerating = false;
+        document.getElementById('sendBtn').disabled = false;
+    }
+
+    function clearVocabChat() {
+        vocabChatMessages = [];
+        const area = document.getElementById('vocabChatArea');
+        if (area) area.innerHTML = '';
     }
 
     // --- 音声合成 ---
@@ -1309,6 +1413,12 @@ Output ONLY in this exact JSON format, no other text:
         // ドラマモードの場合は専用ハンドラへ
         if (settings.mode === 'drama' && dramaState) {
             handleDramaInput(text);
+            return;
+        }
+
+        // 単語学習モードの場合は例文への質問チャットへ
+        if (settings.mode === 'vocab' && vocabState) {
+            handleVocabChat(text);
             return;
         }
 
