@@ -411,6 +411,13 @@
             color: #666;
             padding: 4px;
         }
+        .vocab-progress {
+            display: block;
+            font-size: 10px;
+            color: #888;
+            margin-top: 2px;
+        }
+        .vocab-cat-btn.active .vocab-progress { color: #ccc; }
         .vocab-due-badge {
             display: inline-block;
             background: #e94560;
@@ -938,12 +945,15 @@ Output ONLY in this exact JSON format, no other text:
     function getDueCount(cat) {
         const words = VOCAB_DATA[cat];
         if (!words) return 0;
-        return words.filter(w => isDue(cat, w.ja)).length;
+        const unlocked = getUnlockedCount(cat);
+        return words.slice(0, unlocked).filter(w => isDue(cat, w.ja)).length;
     }
     function getAllDueWords() {
         const due = [];
         for (const cat of Object.keys(VOCAB_DATA)) {
-            for (const word of VOCAB_DATA[cat]) {
+            const unlocked = getUnlockedCount(cat);
+            const words = VOCAB_DATA[cat].slice(0, unlocked);
+            for (const word of words) {
                 if (isDue(cat, word.ja)) {
                     due.push({ ...word, _cat: cat });
                 }
@@ -958,6 +968,23 @@ Output ONLY in this exact JSON format, no other text:
         });
         return due;
     }
+    // --- 段階的アンロック ---
+    function getUnlockedCount(cat) {
+        const words = VOCAB_DATA[cat];
+        if (!words) return 0;
+        const srs = loadSRS();
+        let unlocked = 1; // 最初の1問は常に解放
+        for (let i = 0; i < words.length - 1; i++) {
+            const entry = srs[getSRSKey(cat, words[i].ja)];
+            if (entry && entry.streak >= 2) {
+                unlocked++;
+            } else {
+                break; // 順番に解放するので、未達成があればそこで止まる
+            }
+        }
+        return Math.min(unlocked, words.length);
+    }
+
     function getSRSLabel(cat, ja) {
         const entry = getSRSEntry(cat, ja);
         if (entry.streak === 0 && entry.nextReview === 0) return '新規';
@@ -978,7 +1005,10 @@ Output ONLY in this exact JSON format, no other text:
         let catBtns = categories.map(cat => {
             const due = getDueCount(cat);
             const badge = due > 0 ? `<span class="vocab-due-badge">${due}</span>` : '';
-            return `<button class="vocab-cat-btn" onclick="selectVocabCategory('${cat}')">${cat}${badge}</button>`;
+            const unlocked = getUnlockedCount(cat);
+            const total = VOCAB_DATA[cat].length;
+            const progress = unlocked >= total ? ' &#10003;' : ` ${unlocked}/${total}`;
+            return `<button class="vocab-cat-btn" onclick="selectVocabCategory('${cat}')">${cat}<span class="vocab-progress">${progress}</span>${badge}</button>`;
         }).join('');
 
         const reviewBtn = allDue > 0
@@ -991,7 +1021,8 @@ Output ONLY in this exact JSON format, no other text:
     }
 
     function selectVocabCategory(cat) {
-        const words = [...VOCAB_DATA[cat]];
+        const unlocked = getUnlockedCount(cat);
+        const words = VOCAB_DATA[cat].slice(0, unlocked);
         // 復習期限順にソート（期限切れ＝due が先、新規が先）
         const srs = loadSRS();
         words.sort((a, b) => {
@@ -1021,7 +1052,10 @@ Output ONLY in this exact JSON format, no other text:
             const due = getDueCount(c);
             const badge = due > 0 ? `<span class="vocab-due-badge">${due}</span>` : '';
             const active = !vs.isReview && c === vs.category ? 'active' : '';
-            return `<button class="vocab-cat-btn ${active}" onclick="selectVocabCategory('${c}')">${c}${badge}</button>`;
+            const unlocked = getUnlockedCount(c);
+            const total = VOCAB_DATA[c].length;
+            const progress = unlocked >= total ? ' &#10003;' : ` ${unlocked}/${total}`;
+            return `<button class="vocab-cat-btn ${active}" onclick="selectVocabCategory('${c}')">${c}<span class="vocab-progress">${progress}</span>${badge}</button>`;
         }).join('');
 
         const allDue = getAllDueWords().length;
