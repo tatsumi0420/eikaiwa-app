@@ -468,6 +468,109 @@
         .streak-day.today {
             border: 1px solid #e94560;
         }
+
+        /* テックトレンドモード */
+        .tt-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .tt-status {
+            text-align: center;
+            color: #888;
+            font-size: 14px;
+            padding: 40px 16px;
+        }
+        .tt-status .loading-dots::after {
+            content: '';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        @keyframes dots {
+            0% { content: ''; }
+            25% { content: '.'; }
+            50% { content: '..'; }
+            75% { content: '...'; }
+        }
+        .tt-topic-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #e94560;
+            text-align: center;
+            padding: 8px 0;
+        }
+        .tt-article {
+            background: #2a2a4a;
+            border-radius: 16px;
+            padding: 20px;
+            font-size: 15px;
+            line-height: 1.9;
+            color: #ddd;
+            max-height: 50vh;
+            overflow-y: auto;
+        }
+        .tt-article p {
+            margin-bottom: 12px;
+        }
+        .tt-phrase-box {
+            background: #0f3460;
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+        }
+        .tt-phrase-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+        }
+        .tt-phrase-en {
+            font-size: 22px;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+        .tt-phrase-explanation {
+            font-size: 14px;
+            color: #aaa;
+            line-height: 1.6;
+        }
+        .tt-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+            padding: 12px 0;
+        }
+        .tt-controls button {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .tt-btn-play {
+            background: #e94560;
+            color: white;
+            width: 72px !important;
+            height: 72px !important;
+            font-size: 30px !important;
+        }
+        .tt-btn-skip {
+            background: #333;
+            color: #ccc;
+        }
+        .tt-now-playing {
+            text-align: center;
+            font-size: 13px;
+            color: #52b788;
+            min-height: 20px;
+        }
     </style>
 
 </head>
@@ -485,6 +588,7 @@
             <select id="s-mode">
                 <option value="drama">英語劇</option>
                 <option value="vocab">単語学習</option>
+                <option value="techtrend">テックトレンド</option>
             </select>
             <label>音声入力の言語</label>
             <select id="s-mic-lang">
@@ -579,6 +683,8 @@
                 return ''; // ドラマモードは専用ロジックで処理
             case 'vocab':
                 return ''; // 単語学習モードは専用ロジックで処理
+            case 'techtrend':
+                return ''; // テックトレンドモードは専用ロジックで処理
             default:
                 return '';
         }
@@ -1260,6 +1366,227 @@ ${waysText}`
         if (area) area.innerHTML = '';
     }
 
+    // --- テックトレンドモード ---
+    let ttState = null; // { topic, article, phrase, phraseExplanation, isPlaying, isSpeaking, abortController }
+
+    function initTechTrend() {
+        const chatArea = document.getElementById('chatArea');
+        if (!chatArea) return;
+
+        ttState = { topic: '', article: '', phrase: '', phraseExplanation: '', isPlaying: false, isSpeaking: false, abortController: null };
+
+        chatArea.innerHTML = `
+            <div class="tt-container" id="ttContainer">
+                <div class="tt-controls">
+                    <button class="tt-btn-skip" onclick="ttSkip()" title="次のトピック">&#9193;</button>
+                    <button class="tt-btn-play" id="ttPlayBtn" onclick="ttTogglePlay()" title="再生">&#9654;</button>
+                </div>
+                <div class="tt-now-playing" id="ttNowPlaying"></div>
+                <div class="tt-status" id="ttStatus">再生ボタンを押すとテックトレンドが始まります</div>
+            </div>`;
+    }
+
+    async function ttGenerateTopic() {
+        const statusEl = document.getElementById('ttStatus');
+        const container = document.getElementById('ttContainer');
+        if (!container) return;
+
+        // ステータス表示
+        if (statusEl) {
+            statusEl.innerHTML = 'トピックを生成中<span class="loading-dots"></span>';
+            statusEl.style.display = '';
+        }
+
+        const prompt = `あなたはテック系ポッドキャストのパーソナリティです。海外の最新テクノロジートレンド（AI、クラウド、Web開発、スタートアップ、サイバーセキュリティ、ガジェットなど）から1つトピックを選び、以下のJSON形式で出力してください。
+
+重要な指示：
+- "article"は必ず2000文字以上4000文字以下の日本語テキストにしてください。
+- ポッドキャストの語り口調で、リスナーに話しかけるように書いてください（「〜ですよね」「〜なんですよ」「さて、ここからが面白いんですが」など）。
+- 具体的な企業名、サービス名、数字を交えて臨場感を出してください。
+- 段落ごとに改行を入れてください。
+- "phrase"はこのトピックに関連する実用的な英語フレーズ1文です。
+- "phraseExplanation"はそのフレーズの意味・使い方の日本語解説です。
+
+JSON形式（これ以外は出力しないでください）：
+{
+  "topic": "トピックのタイトル",
+  "article": "ポッドキャスト風の記事本文（2000〜4000文字）",
+  "phrase": "English phrase here.",
+  "phraseExplanation": "フレーズの日本語解説"
+}`;
+
+        try {
+            const result = await callGroqNonStream([
+                { role: 'system', content: 'あなたはテック系ポッドキャストのホストです。必ず有効なJSON形式のみで回答してください。' },
+                { role: 'user', content: prompt }
+            ]);
+
+            // JSONパース
+            let data;
+            try {
+                const jsonMatch = result.match(/\{[\s\S]*\}/);
+                data = JSON.parse(jsonMatch ? jsonMatch[0] : result);
+            } catch {
+                throw new Error('AIの応答をパースできませんでした');
+            }
+
+            ttState.topic = data.topic || 'テックトレンド';
+            ttState.article = data.article || '';
+            ttState.phrase = data.phrase || '';
+            ttState.phraseExplanation = data.phraseExplanation || '';
+
+            ttRenderContent();
+            recordActivity('techtrend', 1);
+            updateStreakDisplay();
+
+        } catch (err) {
+            if (statusEl) statusEl.textContent = 'エラー: ' + err.message;
+            ttState.isPlaying = false;
+            ttUpdatePlayBtn();
+        }
+    }
+
+    function ttRenderContent() {
+        const container = document.getElementById('ttContainer');
+        if (!container) return;
+
+        const articleHtml = escapeHtml(ttState.article).replace(/\n/g, '</p><p>');
+
+        container.innerHTML = `
+            <div class="tt-controls">
+                <button class="tt-btn-skip" onclick="ttSkip()" title="次のトピック">&#9193;</button>
+                <button class="tt-btn-play" id="ttPlayBtn" onclick="ttTogglePlay()">&#9654;</button>
+            </div>
+            <div class="tt-now-playing" id="ttNowPlaying"></div>
+            <div class="tt-topic-title">${escapeHtml(ttState.topic)}</div>
+            <div class="tt-article"><p>${articleHtml}</p></div>
+            <div class="tt-phrase-box">
+                <div class="tt-phrase-label">&#127911; 今日のフレーズ</div>
+                <div class="tt-phrase-en">${escapeHtml(ttState.phrase)}</div>
+                <div class="tt-phrase-explanation">${escapeHtml(ttState.phraseExplanation)}</div>
+            </div>`;
+
+        ttUpdatePlayBtn();
+    }
+
+    function ttUpdatePlayBtn() {
+        const btn = document.getElementById('ttPlayBtn');
+        if (!btn) return;
+        btn.innerHTML = ttState.isPlaying ? '&#9646;&#9646;' : '&#9654;';
+    }
+
+    function ttSetNowPlaying(text) {
+        const el = document.getElementById('ttNowPlaying');
+        if (el) el.textContent = text;
+    }
+
+    async function ttTogglePlay() {
+        if (!ttState) return;
+
+        if (ttState.isPlaying) {
+            // 一時停止
+            ttState.isPlaying = false;
+            ttState.isSpeaking = false;
+            window.speechSynthesis.cancel();
+            ttUpdatePlayBtn();
+            ttSetNowPlaying('');
+            return;
+        }
+
+        // 再生開始
+        ttState.isPlaying = true;
+        ttUpdatePlayBtn();
+
+        // トピックがまだなければ生成
+        if (!ttState.article) {
+            await ttGenerateTopic();
+            if (!ttState.isPlaying) return; // 生成中に停止された
+        }
+
+        // 再生フロー開始
+        await ttPlaySequence();
+    }
+
+    async function ttPlaySequence() {
+        if (!ttState || !ttState.isPlaying) return;
+
+        // 1. 記事を段落ごとに読み上げ
+        ttSetNowPlaying('記事を読み上げ中...');
+        const paragraphs = ttState.article.split('\n').filter(p => p.trim());
+
+        for (const para of paragraphs) {
+            if (!ttState.isPlaying) return;
+
+            // Web Speech APIは長文だと途切れるので、文単位で分割
+            const sentences = para.match(/[^。！？]+[。！？]?/g) || [para];
+            for (const sentence of sentences) {
+                if (!ttState.isPlaying) return;
+                if (!sentence.trim()) continue;
+                ttState.isSpeaking = true;
+                await speak(sentence.trim(), 'ja-JP', settings.speed);
+                ttState.isSpeaking = false;
+            }
+        }
+
+        if (!ttState.isPlaying) return;
+
+        // 2. 英語フレーズ読み上げ
+        ttSetNowPlaying('英語フレーズ: ' + ttState.phrase);
+        ttState.isSpeaking = true;
+        await speak(ttState.phrase, 'en-US', Math.max(settings.speed * 0.8, 0.5));
+        ttState.isSpeaking = false;
+
+        if (!ttState.isPlaying) return;
+
+        // 3. フレーズ解説読み上げ
+        ttSetNowPlaying('フレーズ解説中...');
+        ttState.isSpeaking = true;
+        await speak(ttState.phraseExplanation, 'ja-JP', settings.speed);
+        ttState.isSpeaking = false;
+
+        if (!ttState.isPlaying) return;
+
+        // 4. もう一度英語フレーズ
+        ttSetNowPlaying('もう一度: ' + ttState.phrase);
+        ttState.isSpeaking = true;
+        await speak(ttState.phrase, 'en-US', settings.speed);
+        ttState.isSpeaking = false;
+
+        if (!ttState.isPlaying) return;
+
+        // 5. 次のトピックへ自動進行
+        ttSetNowPlaying('次のトピックを準備中...');
+        ttState.article = '';
+        ttState.phrase = '';
+        ttState.phraseExplanation = '';
+        ttState.topic = '';
+        await ttGenerateTopic();
+
+        if (!ttState.isPlaying) return;
+        await ttPlaySequence();
+    }
+
+    async function ttSkip() {
+        if (!ttState) return;
+        const wasPlaying = ttState.isPlaying;
+        ttState.isPlaying = false;
+        ttState.isSpeaking = false;
+        window.speechSynthesis.cancel();
+
+        ttState.article = '';
+        ttState.phrase = '';
+        ttState.phraseExplanation = '';
+        ttState.topic = '';
+
+        ttState.isPlaying = true;
+        ttUpdatePlayBtn();
+        await ttGenerateTopic();
+        if (!ttState.isPlaying) return;
+        if (wasPlaying) {
+            await ttPlaySequence();
+        }
+    }
+
     // --- 音声合成 ---
     function speak(text, lang, speed) {
         return new Promise((resolve) => {
@@ -1373,7 +1700,7 @@ ${waysText}`
             </div>
             <div id="streakArea">${renderStreakBar()}</div>
             <div class="chat-area" id="chatArea"></div>
-            <div class="input-area">
+            <div class="input-area" id="inputArea" ${settings.mode === 'techtrend' ? 'style="display:none"' : ''}>
                 <button id="micBtn" class="mic-btn" onclick="toggleMic()">&#127908;</button>
                 <textarea id="userInput" rows="1" placeholder="メッセージを入力..."
                     onkeydown="handleKey(event)"></textarea>
@@ -1382,18 +1709,22 @@ ${waysText}`
 
         // 既存メッセージを再描画
         const chatArea = document.getElementById('chatArea');
-        for (const msg of messages) {
-            if (msg.role === 'user' || msg.role === 'assistant') {
-                appendMessage(msg.role === 'user' ? 'user' : 'ai', msg.content);
+        if (settings.mode !== 'techtrend') {
+            for (const msg of messages) {
+                if (msg.role === 'user' || msg.role === 'assistant') {
+                    appendMessage(msg.role === 'user' ? 'user' : 'ai', msg.content);
+                }
             }
+            chatArea.scrollTop = chatArea.scrollHeight;
         }
-        chatArea.scrollTop = chatArea.scrollHeight;
 
         // 特殊モード初期化
         if (settings.mode === 'drama' && !dramaState) {
             startDrama();
         } else if (settings.mode === 'vocab') {
             initVocab();
+        } else if (settings.mode === 'techtrend') {
+            initTechTrend();
         }
 
         // textarea自動リサイズ
@@ -1541,6 +1872,12 @@ ${waysText}`
         messages = [];
         dramaState = null;
         vocabState = null;
+        if (ttState) {
+            ttState.isPlaying = false;
+            ttState.isSpeaking = false;
+            window.speechSynthesis.cancel();
+        }
+        ttState = null;
         closeSettings();
         render();
     }
