@@ -1589,6 +1589,33 @@ ${waysText}`
     }
 
     // --- 音声合成 ---
+    function pickBestVoice(voices, lang) {
+        // 完全一致する声を絞り込み
+        const exact = voices.filter(v => v.lang === lang || v.lang.replace('_', '-') === lang);
+        // 言語プレフィックス一致（ja, en等）
+        const prefix = lang.substring(0, 2);
+        const partial = exact.length ? exact : voices.filter(v => v.lang.startsWith(prefix));
+        if (!partial.length) return null;
+
+        // Neural/Online声を優先（Microsoft Online, Google等の高品質音声）
+        const neural = partial.find(v =>
+            v.name.includes('Online') || v.name.includes('Neural') ||
+            v.name.includes('Natural') || v.name.includes('Wavenet')
+        );
+        if (neural) return neural;
+
+        // 次にローカルの高品質音声（Microsoft Nanami, Ayumi等）
+        const preferred = lang.startsWith('ja')
+            ? ['Nanami', 'Ayumi', 'Haruka', 'Ichiro']
+            : ['Aria', 'Jenny', 'Guy', 'Ana', 'Zira'];
+        for (const name of preferred) {
+            const found = partial.find(v => v.name.includes(name));
+            if (found) return found;
+        }
+
+        return partial[0];
+    }
+
     function speak(text, lang, speed) {
         return new Promise((resolve) => {
             if (!('speechSynthesis' in window)) { resolve(); return; }
@@ -1597,10 +1624,9 @@ ${waysText}`
             utter.lang = lang || 'en-US';
             utter.rate = speed || 1.0;
 
-            // 適切な音声を選択
             const voices = window.speechSynthesis.getVoices();
-            const match = voices.find(v => v.lang.startsWith(lang.substring(0, 2)));
-            if (match) utter.voice = match;
+            const best = pickBestVoice(voices, utter.lang);
+            if (best) utter.voice = best;
 
             utter.onend = resolve;
             utter.onerror = resolve;
