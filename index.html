@@ -514,48 +514,6 @@
             50% { content: '..'; }
             75% { content: '...'; }
         }
-        .tt-topic-title {
-            font-size: 20px;
-            font-weight: bold;
-            color: #e94560;
-            text-align: center;
-            padding: 8px 0;
-        }
-        .tt-article {
-            background: #2a2a4a;
-            border-radius: 16px;
-            padding: 20px;
-            font-size: 15px;
-            line-height: 1.9;
-            color: #ddd;
-            max-height: 50vh;
-            overflow-y: auto;
-        }
-        .tt-article p {
-            margin-bottom: 12px;
-        }
-        .tt-phrase-box {
-            background: #0f3460;
-            border-radius: 16px;
-            padding: 20px;
-            text-align: center;
-        }
-        .tt-phrase-label {
-            font-size: 12px;
-            color: #888;
-            margin-bottom: 8px;
-        }
-        .tt-phrase-en {
-            font-size: 22px;
-            font-weight: bold;
-            color: #fff;
-            margin-bottom: 8px;
-        }
-        .tt-phrase-explanation {
-            font-size: 14px;
-            color: #aaa;
-            line-height: 1.6;
-        }
         .tt-controls {
             display: flex;
             justify-content: center;
@@ -564,32 +522,78 @@
             padding: 12px 0;
         }
         .tt-controls button {
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
+            padding: 12px 28px;
+            border-radius: 24px;
             border: none;
-            font-size: 24px;
+            font-size: 15px;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            font-weight: bold;
         }
-        .tt-btn-play {
+        .tt-btn-fetch {
             background: #e94560;
             color: white;
-            width: 72px !important;
-            height: 72px !important;
-            font-size: 30px !important;
+        }
+        .tt-btn-fetch:disabled {
+            background: #555;
+            cursor: not-allowed;
         }
         .tt-btn-skip {
             background: #333;
             color: #ccc;
         }
-        .tt-now-playing {
-            text-align: center;
+        .tt-card {
+            background: #2a2a4a;
+            border-radius: 16px;
+            padding: 18px;
+        }
+        .tt-card-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #e94560;
+            margin-bottom: 12px;
+        }
+        .tt-card-url-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            background: #1a1a2e;
+            border-radius: 10px;
+            padding: 10px 12px;
+        }
+        .tt-card-url {
+            flex: 1;
             font-size: 13px;
-            color: #52b788;
-            min-height: 20px;
+            color: #6cb4ee;
+            word-break: break-all;
+            text-decoration: none;
+        }
+        .tt-card-url:hover { text-decoration: underline; }
+        .tt-card-url-status {
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        .tt-copy-btn {
+            flex-shrink: 0;
+            padding: 6px 14px;
+            background: #0f3460;
+            color: #ccc;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .tt-copy-btn:active { background: #52b788; color: white; }
+        .tt-card-phrase {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+        .tt-card-phrase-jp {
+            font-size: 14px;
+            color: #aaa;
         }
     </style>
 
@@ -1406,224 +1410,246 @@ ${waysText}`
     }
 
     // --- テックトレンドモード ---
-    let ttState = null; // { topic, article, phrase, phraseExplanation, isPlaying, isSpeaking, abortController }
+    let ttState = null; // { topics: [], isFetching }
+    const TT_VERIFY_URL = 'https://bubo.inc/eikaiwa-webhook/verify_url.php';
+    const TT_MAX_RETRY = 3;
 
     function initTechTrend() {
         const chatArea = document.getElementById('chatArea');
         if (!chatArea) return;
 
-        ttState = { topic: '', article: '', phrase: '', phraseExplanation: '', isPlaying: false, isSpeaking: false, abortController: null };
+        ttState = { topics: [], isFetching: false };
 
         chatArea.innerHTML = `
             <div class="tt-container" id="ttContainer">
                 <div class="tt-controls">
-                    <button class="tt-btn-skip" onclick="ttSkip()" title="次のトピック">&#9193;</button>
-                    <button class="tt-btn-play" id="ttPlayBtn" onclick="ttTogglePlay()" title="再生">&#9654;</button>
+                    <button class="tt-btn-fetch" id="ttFetchBtn" onclick="ttFetch()">記事を取得</button>
+                    <button class="tt-btn-skip" onclick="ttFetch()">次の3件</button>
                 </div>
-                <div class="tt-now-playing" id="ttNowPlaying"></div>
-                <div class="tt-status" id="ttStatus">再生ボタンを押すとテックトレンドが始まります</div>
+                <div class="tt-status" id="ttStatus">「記事を取得」ボタンを押すとテックトレンドが表示されます</div>
             </div>`;
     }
 
-    async function ttGenerateTopic() {
-        const statusEl = document.getElementById('ttStatus');
+    async function ttFetch() {
+        if (!ttState || ttState.isFetching) return;
+        ttState.isFetching = true;
+
         const container = document.getElementById('ttContainer');
-        if (!container) return;
+        const fetchBtn = document.getElementById('ttFetchBtn');
+        if (fetchBtn) fetchBtn.disabled = true;
 
         // ステータス表示
+        const statusEl = document.getElementById('ttStatus');
         if (statusEl) {
-            statusEl.innerHTML = 'トピックを生成中<span class="loading-dots"></span>';
+            statusEl.innerHTML = '記事を取得中<span class="loading-dots"></span>';
             statusEl.style.display = '';
         }
-
-        const prompt = `あなたはテック系ポッドキャストのパーソナリティです。海外の最新テクノロジートレンド（AI、クラウド、Web開発、スタートアップ、サイバーセキュリティ、ガジェットなど）から1つトピックを選んでください。
-
-以下の形式で出力してください。各セクションは必ず指定のタグで囲んでください。
-
-<TOPIC>トピックのタイトル</TOPIC>
-
-<ARTICLE>
-ここにポッドキャスト風の記事本文を書いてください。
-- 2000文字以上4000文字以下の日本語テキスト
-- リスナーに話しかける口調（「〜ですよね」「〜なんですよ」「さて、ここからが面白いんですが」など）
-- 具体的な企業名、サービス名、数字を交えて臨場感を出す
-- 段落ごとに改行を入れる
-</ARTICLE>
-
-<PHRASE>トピックに関連する実用的な英語フレーズ1文</PHRASE>
-
-<EXPLANATION>フレーズの意味・使い方の日本語解説</EXPLANATION>`;
+        // カード部分をクリア
+        container.querySelectorAll('.tt-card').forEach(el => el.remove());
 
         try {
-            const result = await callGroqNonStream([
-                { role: 'system', content: 'あなたはテック系ポッドキャストのホストです。指定されたタグ形式で回答してください。' },
-                { role: 'user', content: prompt }
-            ]);
+            // AI に3トピック生成させる
+            let topics = await ttGenerateTopics();
 
-            // タグベースでパース
-            const topicMatch = result.match(/<TOPIC>([\s\S]*?)<\/TOPIC>/);
-            const articleMatch = result.match(/<ARTICLE>([\s\S]*?)<\/ARTICLE>/);
-            const phraseMatch = result.match(/<PHRASE>([\s\S]*?)<\/PHRASE>/);
-            const explanationMatch = result.match(/<EXPLANATION>([\s\S]*?)<\/EXPLANATION>/);
+            // URL検証 + リトライ
+            topics = await ttVerifyAndRetry(topics);
 
-            if (!articleMatch) {
-                throw new Error('記事の生成に失敗しました。もう一度お試しください。');
-            }
-
-            ttState.topic = (topicMatch ? topicMatch[1] : 'テックトレンド').trim();
-            ttState.article = articleMatch[1].trim();
-            ttState.phrase = (phraseMatch ? phraseMatch[1] : '').trim();
-            ttState.phraseExplanation = (explanationMatch ? explanationMatch[1] : '').trim();
-
-            ttRenderContent();
+            ttState.topics = topics;
+            ttRenderCards();
             recordActivity('techtrend', 1);
             updateStreakDisplay();
 
         } catch (err) {
             if (statusEl) statusEl.textContent = 'エラー: ' + err.message;
-            ttState.isPlaying = false;
-            ttUpdatePlayBtn();
+        }
+
+        ttState.isFetching = false;
+        if (fetchBtn) fetchBtn.disabled = false;
+    }
+
+    async function ttGenerateTopics() {
+        const prompt = `あなたはテック系ニュースキュレーターです。海外の最新テクノロジートレンド（AI、クラウド、Web開発、スタートアップ、サイバーセキュリティ、ガジェットなど）から3つのトピックを選んでください。
+
+重要なルール:
+- 各トピックについて、実在する最新の英語記事のURLを1つ返すこと
+- 架空のURLは絶対に生成しないこと
+- URLは実際にブラウザでアクセスできる記事ページであること
+- TechCrunch, The Verge, Ars Technica, Wired, MIT Technology Review, ZDNet, Hacker News 等の有名テックメディアから選ぶこと
+
+以下の形式で出力してください:
+
+<TOPIC1>記事タイトル（日本語）</TOPIC1>
+<URL1>https://実在する記事のURL</URL1>
+<PHRASE1>トピックに関連する簡単な英語ワンフレーズ</PHRASE1>
+<JP1>ワンフレーズの日本語訳</JP1>
+
+<TOPIC2>記事タイトル（日本語）</TOPIC2>
+<URL2>https://実在する記事のURL</URL2>
+<PHRASE2>トピックに関連する簡単な英語ワンフレーズ</PHRASE2>
+<JP2>ワンフレーズの日本語訳</JP2>
+
+<TOPIC3>記事タイトル（日本語）</TOPIC3>
+<URL3>https://実在する記事のURL</URL3>
+<PHRASE3>トピックに関連する簡単な英語ワンフレーズ</PHRASE3>
+<JP3>ワンフレーズの日本語訳</JP3>`;
+
+        const result = await callGroqNonStream([
+            { role: 'system', content: 'あなたはテック系ニュースキュレーターです。指定されたタグ形式で回答してください。実在するURLのみを返してください。' },
+            { role: 'user', content: prompt }
+        ]);
+
+        return ttParseTopics(result);
+    }
+
+    function ttParseTopics(text) {
+        const topics = [];
+        for (let i = 1; i <= 3; i++) {
+            const topic = text.match(new RegExp(`<TOPIC${i}>([\\s\\S]*?)<\\/TOPIC${i}>`));
+            const url = text.match(new RegExp(`<URL${i}>([\\s\\S]*?)<\\/URL${i}>`));
+            const phrase = text.match(new RegExp(`<PHRASE${i}>([\\s\\S]*?)<\\/PHRASE${i}>`));
+            const jp = text.match(new RegExp(`<JP${i}>([\\s\\S]*?)<\\/JP${i}>`));
+            if (topic && url) {
+                topics.push({
+                    title: topic[1].trim(),
+                    url: url[1].trim(),
+                    phrase: phrase ? phrase[1].trim() : '',
+                    jp: jp ? jp[1].trim() : '',
+                    urlValid: null, // null=未検証, true=有効, false=無効
+                });
+            }
+        }
+        return topics;
+    }
+
+    async function ttVerifyUrls(urls) {
+        try {
+            const resp = await fetch(TT_VERIFY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ urls }),
+            });
+            if (!resp.ok) throw new Error('URL検証サーバーエラー');
+            const data = await resp.json();
+            return data.results || [];
+        } catch {
+            // 検証サーバーに繋がらない場合はすべて有効扱い
+            return urls.map(url => ({ url, status: 0, valid: true }));
         }
     }
 
-    function ttRenderContent() {
-        const container = document.getElementById('ttContainer');
-        if (!container) return;
+    async function ttVerifyAndRetry(topics) {
+        const statusEl = document.getElementById('ttStatus');
 
-        const articleHtml = escapeHtml(ttState.article).replace(/\n/g, '</p><p>');
+        for (let retry = 0; retry < TT_MAX_RETRY; retry++) {
+            // 未検証のURLを検証
+            const urlsToVerify = topics.filter(t => t.urlValid === null).map(t => t.url);
+            if (urlsToVerify.length === 0) break;
 
-        container.innerHTML = `
-            <div class="tt-controls">
-                <button class="tt-btn-skip" onclick="ttSkip()" title="次のトピック">&#9193;</button>
-                <button class="tt-btn-play" id="ttPlayBtn" onclick="ttTogglePlay()">&#9654;</button>
-            </div>
-            <div class="tt-now-playing" id="ttNowPlaying"></div>
-            <div class="tt-topic-title">${escapeHtml(ttState.topic)}</div>
-            <div class="tt-article"><p>${articleHtml}</p></div>
-            <div class="tt-phrase-box">
-                <div class="tt-phrase-label">&#127911; 今日のフレーズ</div>
-                <div class="tt-phrase-en">${escapeHtml(ttState.phrase)}</div>
-                <div class="tt-phrase-explanation">${escapeHtml(ttState.phraseExplanation)}</div>
-            </div>`;
+            if (statusEl) {
+                statusEl.innerHTML = retry === 0
+                    ? 'URLを確認中<span class="loading-dots"></span>'
+                    : `URLを確認中...（再取得 ${retry}/${TT_MAX_RETRY}）<span class="loading-dots"></span>`;
+                statusEl.style.display = '';
+            }
 
-        ttUpdatePlayBtn();
-    }
+            const results = await ttVerifyUrls(urlsToVerify);
+            const resultMap = {};
+            for (const r of results) resultMap[r.url] = r.valid;
 
-    function ttUpdatePlayBtn() {
-        const btn = document.getElementById('ttPlayBtn');
-        if (!btn) return;
-        btn.innerHTML = ttState.isPlaying ? '&#9646;&#9646;' : '&#9654;';
-    }
+            // 検証結果を反映
+            for (const t of topics) {
+                if (t.urlValid === null && resultMap[t.url] !== undefined) {
+                    t.urlValid = resultMap[t.url];
+                }
+            }
 
-    function ttSetNowPlaying(text) {
-        const el = document.getElementById('ttNowPlaying');
-        if (el) el.textContent = text;
-    }
+            // 無効なトピックがあれば再生成
+            const invalidIndices = topics.map((t, i) => t.urlValid === false ? i : -1).filter(i => i >= 0);
+            if (invalidIndices.length === 0) break;
 
-    async function ttTogglePlay() {
-        if (!ttState) return;
+            if (retry < TT_MAX_RETRY - 1) {
+                // 無効なトピックのみ再生成リクエスト
+                const invalidTitles = invalidIndices.map(i => topics[i].title).join(', ');
+                const retryPrompt = `以下のトピックのURLが無効でした。それぞれ別の実在する記事URLで再生成してください。架空のURLは絶対に生成しないこと。
 
-        if (ttState.isPlaying) {
-            // 一時停止
-            ttState.isPlaying = false;
-            ttState.isSpeaking = false;
-            window.speechSynthesis.cancel();
-            ttUpdatePlayBtn();
-            ttSetNowPlaying('');
-            return;
-        }
+無効だったトピック: ${invalidTitles}
 
-        // 再生開始
-        ttState.isPlaying = true;
-        ttUpdatePlayBtn();
+${invalidIndices.map((idx, j) => {
+    const n = j + 1;
+    return `<TOPIC${n}>${topics[idx].title}に代わる別のテックトレンド記事タイトル（日本語）</TOPIC${n}>
+<URL${n}>実在する記事URL</URL${n}>
+<PHRASE${n}>簡単な英語ワンフレーズ</PHRASE${n}>
+<JP${n}>日本語訳</JP${n}>`;
+}).join('\n\n')}`;
 
-        // トピックがまだなければ生成
-        if (!ttState.article) {
-            await ttGenerateTopic();
-            if (!ttState.isPlaying) return; // 生成中に停止された
-        }
+                const retryResult = await callGroqNonStream([
+                    { role: 'system', content: 'あなたはテック系ニュースキュレーターです。実在するURLのみを返してください。' },
+                    { role: 'user', content: retryPrompt }
+                ]);
 
-        // 再生フロー開始
-        await ttPlaySequence();
-    }
-
-    async function ttPlaySequence() {
-        if (!ttState || !ttState.isPlaying) return;
-
-        // 1. 記事を段落ごとに読み上げ
-        ttSetNowPlaying('記事を読み上げ中...');
-        const paragraphs = ttState.article.split('\n').filter(p => p.trim());
-
-        for (const para of paragraphs) {
-            if (!ttState.isPlaying) return;
-
-            // Web Speech APIは長文だと途切れるので、文単位で分割
-            const sentences = para.match(/[^。！？]+[。！？]?/g) || [para];
-            for (const sentence of sentences) {
-                if (!ttState.isPlaying) return;
-                if (!sentence.trim()) continue;
-                ttState.isSpeaking = true;
-                await speak(sentence.trim(), 'ja-JP', settings.speed);
-                ttState.isSpeaking = false;
+                const newTopics = ttParseTopics(retryResult);
+                for (let j = 0; j < invalidIndices.length && j < newTopics.length; j++) {
+                    topics[invalidIndices[j]] = newTopics[j];
+                }
             }
         }
 
-        if (!ttState.isPlaying) return;
+        // 最終的に未検証は有効扱い、無効はそのまま
+        for (const t of topics) {
+            if (t.urlValid === null) t.urlValid = true;
+        }
 
-        // 2. 英語フレーズ読み上げ
-        ttSetNowPlaying('英語フレーズ: ' + ttState.phrase);
-        ttState.isSpeaking = true;
-        await speak(ttState.phrase, 'en-US', Math.max(settings.speed * 0.8, 0.5));
-        ttState.isSpeaking = false;
-
-        if (!ttState.isPlaying) return;
-
-        // 3. フレーズ解説読み上げ
-        ttSetNowPlaying('フレーズ解説中...');
-        ttState.isSpeaking = true;
-        await speak(ttState.phraseExplanation, 'ja-JP', settings.speed);
-        ttState.isSpeaking = false;
-
-        if (!ttState.isPlaying) return;
-
-        // 4. もう一度英語フレーズ
-        ttSetNowPlaying('もう一度: ' + ttState.phrase);
-        ttState.isSpeaking = true;
-        await speak(ttState.phrase, 'en-US', settings.speed);
-        ttState.isSpeaking = false;
-
-        if (!ttState.isPlaying) return;
-
-        // 5. 次のトピックへ自動進行
-        ttSetNowPlaying('次のトピックを準備中...');
-        ttState.article = '';
-        ttState.phrase = '';
-        ttState.phraseExplanation = '';
-        ttState.topic = '';
-        await ttGenerateTopic();
-
-        if (!ttState.isPlaying) return;
-        await ttPlaySequence();
+        return topics;
     }
 
-    async function ttSkip() {
-        if (!ttState) return;
-        const wasPlaying = ttState.isPlaying;
-        ttState.isPlaying = false;
-        ttState.isSpeaking = false;
-        window.speechSynthesis.cancel();
+    function ttRenderCards() {
+        const container = document.getElementById('ttContainer');
+        if (!container) return;
 
-        ttState.article = '';
-        ttState.phrase = '';
-        ttState.phraseExplanation = '';
-        ttState.topic = '';
+        const statusEl = document.getElementById('ttStatus');
+        if (statusEl) statusEl.style.display = 'none';
 
-        ttState.isPlaying = true;
-        ttUpdatePlayBtn();
-        await ttGenerateTopic();
-        if (!ttState.isPlaying) return;
-        if (wasPlaying) {
-            await ttPlaySequence();
+        // 既存カードをクリア
+        container.querySelectorAll('.tt-card').forEach(el => el.remove());
+
+        for (let i = 0; i < ttState.topics.length; i++) {
+            const t = ttState.topics[i];
+            const validIcon = t.urlValid === false ? '&#10060;' : '&#9989;';
+            const invalidNote = t.urlValid === false
+                ? '<div style="font-size:12px;color:#e94560;margin-bottom:8px;">※ 有効なURLが見つかりませんでした</div>'
+                : '';
+
+            const card = document.createElement('div');
+            card.className = 'tt-card';
+            card.innerHTML = `
+                <div class="tt-card-title">${escapeHtml(t.title)}</div>
+                ${invalidNote}
+                <div class="tt-card-url-row">
+                    <span class="tt-card-url-status">${validIcon}</span>
+                    <a href="${escapeHtml(t.url)}" target="_blank" rel="noopener" class="tt-card-url">${escapeHtml(t.url)}</a>
+                    <button class="tt-copy-btn" onclick="ttCopyUrl(this, '${t.url.replace(/'/g, "\\'")}')">コピー</button>
+                </div>
+                <div class="tt-card-phrase">${escapeHtml(t.phrase)}</div>
+                <div class="tt-card-phrase-jp">${escapeHtml(t.jp)}</div>`;
+            container.appendChild(card);
+        }
+    }
+
+    async function ttCopyUrl(btn, url) {
+        try {
+            await navigator.clipboard.writeText(url);
+            const orig = btn.textContent;
+            btn.textContent = '\u2713 コピー済み';
+            btn.style.background = '#52b788';
+            btn.style.color = 'white';
+            setTimeout(() => {
+                btn.textContent = orig;
+                btn.style.background = '';
+                btn.style.color = '';
+            }, 1500);
+        } catch {
+            // fallback: テキスト選択
+            prompt('URLをコピーしてください:', url);
         }
     }
 
@@ -1938,11 +1964,6 @@ ${waysText}`
         messages = [];
         dramaState = null;
         vocabState = null;
-        if (ttState) {
-            ttState.isPlaying = false;
-            ttState.isSpeaking = false;
-            window.speechSynthesis.cancel();
-        }
         ttState = null;
         closeSettings();
         render();
