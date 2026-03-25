@@ -296,6 +296,26 @@
             font-size: 15px;
             cursor: pointer;
         }
+        .vocab-hint-btn {
+            padding: 10px 28px;
+            background: transparent;
+            border: 1px solid #555;
+            color: #aaa;
+            border-radius: 20px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+        .vocab-hint-text {
+            margin-top: 12px;
+            padding: 10px 14px;
+            background: rgba(233, 69, 96, 0.1);
+            border-left: 3px solid #e94560;
+            border-radius: 6px;
+            color: #ccc;
+            font-size: 14px;
+            line-height: 1.6;
+            text-align: left;
+        }
         .vocab-en-list {
             text-align: left;
             margin-top: 8px;
@@ -1136,14 +1156,14 @@ Output ONLY in this exact JSON format, no other text:
             const eb = srs[getSRSKey(cat, b.ja)] || { nextReview: 0 };
             return ea.nextReview - eb.nextReview;
         });
-        vocabState = { category: cat, words, index: 0, revealed: false, answered: false, isReview: false };
+        vocabState = { category: cat, words, index: 0, revealed: false, answered: false, hinted: false, isReview: false };
         renderVocabCard();
     }
 
     function startReview() {
         const due = getAllDueWords();
         if (due.length === 0) return;
-        vocabState = { category: '復習', words: due, index: 0, revealed: false, answered: false, isReview: true };
+        vocabState = { category: '復習', words: due, index: 0, revealed: false, answered: false, hinted: false, isReview: true };
         renderVocabCard();
     }
 
@@ -1186,13 +1206,25 @@ Output ONLY in this exact JSON format, no other text:
                 </div>`).join('');
         }
 
+        // ヒント表示
+        let hintHtml = '';
+        if (!vs.revealed && vs.hinted) {
+            const hints = word.ways.filter(w => w.hint).map(w => escapeHtml(w.hint));
+            if (hints.length > 0) {
+                hintHtml = `<div class="vocab-hint-text">${hints.map((h, i) => `${i + 1}. ${h}`).join('<br>')}</div>`;
+            }
+        }
+
         // OK/NG or 答えを見るボタン
         let actionHtml = '';
         if (!vs.revealed) {
+            const hasHint = word.ways.some(w => w.hint);
             actionHtml = `
-                <div style="text-align:center;margin-top:16px;">
+                <div style="text-align:center;margin-top:16px;display:flex;gap:10px;justify-content:center;">
+                    ${hasHint && !vs.hinted ? `<button class="vocab-hint-btn" onclick="showVocabHint()">&#128161; ヒント</button>` : ''}
                     <button class="vocab-reveal-btn" onclick="revealVocab()">答えを見る</button>
-                </div>`;
+                </div>
+                ${hintHtml}`;
         } else if (!vs.answered) {
             actionHtml = `
                 <div class="vocab-okng">
@@ -1231,6 +1263,11 @@ Output ONLY in this exact JSON format, no other text:
                 vocabChatArea.appendChild(div);
             }
         }
+    }
+
+    function showVocabHint() {
+        vocabState.hinted = true;
+        renderVocabCard();
     }
 
     function revealVocab() {
@@ -1272,6 +1309,7 @@ Output ONLY in this exact JSON format, no other text:
             vs.index++;
             vs.revealed = false;
             vs.answered = false;
+            vs.hinted = false;
         } else {
             // 全問完了 → カテゴリ選択に戻る
             vocabState = null;
@@ -1287,6 +1325,7 @@ Output ONLY in this exact JSON format, no other text:
             vocabState.index--;
             vocabState.revealed = false;
             vocabState.answered = false;
+            vocabState.hinted = false;
             renderVocabCard();
         }
     }
