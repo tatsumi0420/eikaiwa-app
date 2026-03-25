@@ -1397,43 +1397,44 @@ ${waysText}`
             statusEl.style.display = '';
         }
 
-        const prompt = `あなたはテック系ポッドキャストのパーソナリティです。海外の最新テクノロジートレンド（AI、クラウド、Web開発、スタートアップ、サイバーセキュリティ、ガジェットなど）から1つトピックを選び、以下のJSON形式で出力してください。
+        const prompt = `あなたはテック系ポッドキャストのパーソナリティです。海外の最新テクノロジートレンド（AI、クラウド、Web開発、スタートアップ、サイバーセキュリティ、ガジェットなど）から1つトピックを選んでください。
 
-重要な指示：
-- "article"は必ず2000文字以上4000文字以下の日本語テキストにしてください。
-- ポッドキャストの語り口調で、リスナーに話しかけるように書いてください（「〜ですよね」「〜なんですよ」「さて、ここからが面白いんですが」など）。
-- 具体的な企業名、サービス名、数字を交えて臨場感を出してください。
-- 段落ごとに改行を入れてください。
-- "phrase"はこのトピックに関連する実用的な英語フレーズ1文です。
-- "phraseExplanation"はそのフレーズの意味・使い方の日本語解説です。
+以下の形式で出力してください。各セクションは必ず指定のタグで囲んでください。
 
-JSON形式（これ以外は出力しないでください）：
-{
-  "topic": "トピックのタイトル",
-  "article": "ポッドキャスト風の記事本文（2000〜4000文字）",
-  "phrase": "English phrase here.",
-  "phraseExplanation": "フレーズの日本語解説"
-}`;
+<TOPIC>トピックのタイトル</TOPIC>
+
+<ARTICLE>
+ここにポッドキャスト風の記事本文を書いてください。
+- 2000文字以上4000文字以下の日本語テキスト
+- リスナーに話しかける口調（「〜ですよね」「〜なんですよ」「さて、ここからが面白いんですが」など）
+- 具体的な企業名、サービス名、数字を交えて臨場感を出す
+- 段落ごとに改行を入れる
+</ARTICLE>
+
+<PHRASE>トピックに関連する実用的な英語フレーズ1文</PHRASE>
+
+<EXPLANATION>フレーズの意味・使い方の日本語解説</EXPLANATION>`;
 
         try {
             const result = await callGroqNonStream([
-                { role: 'system', content: 'あなたはテック系ポッドキャストのホストです。必ず有効なJSON形式のみで回答してください。' },
+                { role: 'system', content: 'あなたはテック系ポッドキャストのホストです。指定されたタグ形式で回答してください。' },
                 { role: 'user', content: prompt }
             ]);
 
-            // JSONパース
-            let data;
-            try {
-                const jsonMatch = result.match(/\{[\s\S]*\}/);
-                data = JSON.parse(jsonMatch ? jsonMatch[0] : result);
-            } catch {
-                throw new Error('AIの応答をパースできませんでした');
+            // タグベースでパース
+            const topicMatch = result.match(/<TOPIC>([\s\S]*?)<\/TOPIC>/);
+            const articleMatch = result.match(/<ARTICLE>([\s\S]*?)<\/ARTICLE>/);
+            const phraseMatch = result.match(/<PHRASE>([\s\S]*?)<\/PHRASE>/);
+            const explanationMatch = result.match(/<EXPLANATION>([\s\S]*?)<\/EXPLANATION>/);
+
+            if (!articleMatch) {
+                throw new Error('記事の生成に失敗しました。もう一度お試しください。');
             }
 
-            ttState.topic = data.topic || 'テックトレンド';
-            ttState.article = data.article || '';
-            ttState.phrase = data.phrase || '';
-            ttState.phraseExplanation = data.phraseExplanation || '';
+            ttState.topic = (topicMatch ? topicMatch[1] : 'テックトレンド').trim();
+            ttState.article = articleMatch[1].trim();
+            ttState.phrase = (phraseMatch ? phraseMatch[1] : '').trim();
+            ttState.phraseExplanation = (explanationMatch ? explanationMatch[1] : '').trim();
 
             ttRenderContent();
             recordActivity('techtrend', 1);
