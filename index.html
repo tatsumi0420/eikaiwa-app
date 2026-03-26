@@ -569,9 +569,12 @@
             text-decoration: none;
         }
         .tt-card-url:hover { text-decoration: underline; }
-        .tt-card-url-status {
-            font-size: 14px;
+        .tt-card-source {
+            font-size: 12px;
+            color: #52b788;
+            font-weight: bold;
             flex-shrink: 0;
+            white-space: nowrap;
         }
         .tt-copy-btn {
             flex-shrink: 0;
@@ -1411,8 +1414,7 @@ ${waysText}`
 
     // --- テックトレンドモード ---
     let ttState = null; // { topics: [], isFetching }
-    const TT_VERIFY_URL = 'https://bubo.inc/eikaiwa-webhook/verify_url.php';
-    const TT_MAX_RETRY = 3;
+    const TT_FETCH_NEWS_URL = 'https://bubo.inc/eikaiwa-webhook/fetch_news.php';
 
     function initTechTrend() {
         const chatArea = document.getElementById('chatArea');
@@ -1438,21 +1440,22 @@ ${waysText}`
         const fetchBtn = document.getElementById('ttFetchBtn');
         if (fetchBtn) fetchBtn.disabled = true;
 
-        // ステータス表示
         const statusEl = document.getElementById('ttStatus');
         if (statusEl) {
             statusEl.innerHTML = '記事を取得中<span class="loading-dots"></span>';
             statusEl.style.display = '';
         }
-        // カード部分をクリア
         container.querySelectorAll('.tt-card').forEach(el => el.remove());
 
         try {
-            // AI に3トピック生成させる
-            let topics = await ttGenerateTopics();
+            // RSSフィードから実記事を取得
+            const articles = await ttFetchArticles();
 
-            // URL検証 + リトライ
-            topics = await ttVerifyAndRetry(topics);
+            // 記事タイトルからフレーズを生成
+            if (statusEl) {
+                statusEl.innerHTML = 'フレーズを生成中<span class="loading-dots"></span>';
+            }
+            const topics = await ttGeneratePhrases(articles);
 
             ttState.topics = topics;
             ttRenderCards();
@@ -1467,138 +1470,55 @@ ${waysText}`
         if (fetchBtn) fetchBtn.disabled = false;
     }
 
-    async function ttGenerateTopics() {
-        const prompt = `あなたはテック系ニュースキュレーターです。海外の最新テクノロジートレンド（AI、クラウド、Web開発、スタートアップ、サイバーセキュリティ、ガジェットなど）から3つのトピックを選んでください。
+    async function ttFetchArticles() {
+        const resp = await fetch(`${TT_FETCH_NEWS_URL}?count=3`);
+        if (!resp.ok) throw new Error('記事の取得に失敗しました');
+        const data = await resp.json();
+        if (!data.articles || data.articles.length === 0) {
+            throw new Error('記事が見つかりませんでした');
+        }
+        return data.articles;
+    }
 
-重要なルール:
-- 各トピックについて、実在する最新の英語記事のURLを1つ返すこと
-- 架空のURLは絶対に生成しないこと
-- URLは実際にブラウザでアクセスできる記事ページであること
-- TechCrunch, The Verge, Ars Technica, Wired, MIT Technology Review, ZDNet, Hacker News 等の有名テックメディアから選ぶこと
+    async function ttGeneratePhrases(articles) {
+        const articleList = articles.map((a, i) => `${i + 1}. "${a.title}" (${a.source})`).join('\n');
+
+        const prompt = `以下のテック系記事について、それぞれ英語学習に役立つワンフレーズと日本語訳を生成してください。
+
+記事一覧:
+${articleList}
 
 以下の形式で出力してください:
 
-<TOPIC1>記事タイトル（日本語）</TOPIC1>
-<URL1>https://実在する記事のURL</URL1>
-<PHRASE1>トピックに関連する簡単な英語ワンフレーズ</PHRASE1>
-<JP1>ワンフレーズの日本語訳</JP1>
-
-<TOPIC2>記事タイトル（日本語）</TOPIC2>
-<URL2>https://実在する記事のURL</URL2>
-<PHRASE2>トピックに関連する簡単な英語ワンフレーズ</PHRASE2>
-<JP2>ワンフレーズの日本語訳</JP2>
-
-<TOPIC3>記事タイトル（日本語）</TOPIC3>
-<URL3>https://実在する記事のURL</URL3>
-<PHRASE3>トピックに関連する簡単な英語ワンフレーズ</PHRASE3>
-<JP3>ワンフレーズの日本語訳</JP3>`;
+${articles.map((_, i) => {
+    const n = i + 1;
+    return `<PHRASE${n}>記事${n}に関連する実用的な英語ワンフレーズ</PHRASE${n}>
+<JP${n}>ワンフレーズの日本語訳</JP${n}>`;
+}).join('\n\n')}`;
 
         const result = await callGroqNonStream([
-            { role: 'system', content: 'あなたはテック系ニュースキュレーターです。指定されたタグ形式で回答してください。実在するURLのみを返してください。' },
+            { role: 'system', content: 'あなたは英語学習アシスタントです。テック系記事のタイトルを元に、実用的な英語フレーズと日本語訳を生成してください。指定されたタグ形式で回答してください。' },
             { role: 'user', content: prompt }
         ]);
 
-        return ttParseTopics(result);
+        return ttParsePhrases(result, articles);
     }
 
-    function ttParseTopics(text) {
+    function ttParsePhrases(text, articles) {
         const topics = [];
-        for (let i = 1; i <= 3; i++) {
-            const topic = text.match(new RegExp(`<TOPIC${i}>([\\s\\S]*?)<\\/TOPIC${i}>`));
-            const url = text.match(new RegExp(`<URL${i}>([\\s\\S]*?)<\\/URL${i}>`));
-            const phrase = text.match(new RegExp(`<PHRASE${i}>([\\s\\S]*?)<\\/PHRASE${i}>`));
-            const jp = text.match(new RegExp(`<JP${i}>([\\s\\S]*?)<\\/JP${i}>`));
-            if (topic && url) {
-                topics.push({
-                    title: topic[1].trim(),
-                    url: url[1].trim(),
-                    phrase: phrase ? phrase[1].trim() : '',
-                    jp: jp ? jp[1].trim() : '',
-                    urlValid: null, // null=未検証, true=有効, false=無効
-                });
-            }
-        }
-        return topics;
-    }
-
-    async function ttVerifyUrls(urls) {
-        try {
-            const resp = await fetch(TT_VERIFY_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ urls }),
+        for (let i = 0; i < articles.length; i++) {
+            const n = i + 1;
+            const phrase = text.match(new RegExp(`<PHRASE${n}>([\\s\\S]*?)<\\/PHRASE${n}>`));
+            const jp = text.match(new RegExp(`<JP${n}>([\\s\\S]*?)<\\/JP${n}>`));
+            topics.push({
+                title: articles[i].title,
+                url: articles[i].url,
+                source: articles[i].source,
+                date: articles[i].date,
+                phrase: phrase ? phrase[1].trim() : '',
+                jp: jp ? jp[1].trim() : '',
             });
-            if (!resp.ok) throw new Error('URL検証サーバーエラー');
-            const data = await resp.json();
-            return data.results || [];
-        } catch {
-            // 検証サーバーに繋がらない場合はすべて有効扱い
-            return urls.map(url => ({ url, status: 0, valid: true }));
         }
-    }
-
-    async function ttVerifyAndRetry(topics) {
-        const statusEl = document.getElementById('ttStatus');
-
-        for (let retry = 0; retry < TT_MAX_RETRY; retry++) {
-            // 未検証のURLを検証
-            const urlsToVerify = topics.filter(t => t.urlValid === null).map(t => t.url);
-            if (urlsToVerify.length === 0) break;
-
-            if (statusEl) {
-                statusEl.innerHTML = retry === 0
-                    ? 'URLを確認中<span class="loading-dots"></span>'
-                    : `URLを確認中...（再取得 ${retry}/${TT_MAX_RETRY}）<span class="loading-dots"></span>`;
-                statusEl.style.display = '';
-            }
-
-            const results = await ttVerifyUrls(urlsToVerify);
-            const resultMap = {};
-            for (const r of results) resultMap[r.url] = r.valid;
-
-            // 検証結果を反映
-            for (const t of topics) {
-                if (t.urlValid === null && resultMap[t.url] !== undefined) {
-                    t.urlValid = resultMap[t.url];
-                }
-            }
-
-            // 無効なトピックがあれば再生成
-            const invalidIndices = topics.map((t, i) => t.urlValid === false ? i : -1).filter(i => i >= 0);
-            if (invalidIndices.length === 0) break;
-
-            if (retry < TT_MAX_RETRY - 1) {
-                // 無効なトピックのみ再生成リクエスト
-                const invalidTitles = invalidIndices.map(i => topics[i].title).join(', ');
-                const retryPrompt = `以下のトピックのURLが無効でした。それぞれ別の実在する記事URLで再生成してください。架空のURLは絶対に生成しないこと。
-
-無効だったトピック: ${invalidTitles}
-
-${invalidIndices.map((idx, j) => {
-    const n = j + 1;
-    return `<TOPIC${n}>${topics[idx].title}に代わる別のテックトレンド記事タイトル（日本語）</TOPIC${n}>
-<URL${n}>実在する記事URL</URL${n}>
-<PHRASE${n}>簡単な英語ワンフレーズ</PHRASE${n}>
-<JP${n}>日本語訳</JP${n}>`;
-}).join('\n\n')}`;
-
-                const retryResult = await callGroqNonStream([
-                    { role: 'system', content: 'あなたはテック系ニュースキュレーターです。実在するURLのみを返してください。' },
-                    { role: 'user', content: retryPrompt }
-                ]);
-
-                const newTopics = ttParseTopics(retryResult);
-                for (let j = 0; j < invalidIndices.length && j < newTopics.length; j++) {
-                    topics[invalidIndices[j]] = newTopics[j];
-                }
-            }
-        }
-
-        // 最終的に未検証は有効扱い、無効はそのまま
-        for (const t of topics) {
-            if (t.urlValid === null) t.urlValid = true;
-        }
-
         return topics;
     }
 
@@ -1609,23 +1529,17 @@ ${invalidIndices.map((idx, j) => {
         const statusEl = document.getElementById('ttStatus');
         if (statusEl) statusEl.style.display = 'none';
 
-        // 既存カードをクリア
         container.querySelectorAll('.tt-card').forEach(el => el.remove());
 
         for (let i = 0; i < ttState.topics.length; i++) {
             const t = ttState.topics[i];
-            const validIcon = t.urlValid === false ? '&#10060;' : '&#9989;';
-            const invalidNote = t.urlValid === false
-                ? '<div style="font-size:12px;color:#e94560;margin-bottom:8px;">※ 有効なURLが見つかりませんでした</div>'
-                : '';
 
             const card = document.createElement('div');
             card.className = 'tt-card';
             card.innerHTML = `
                 <div class="tt-card-title">${escapeHtml(t.title)}</div>
-                ${invalidNote}
                 <div class="tt-card-url-row">
-                    <span class="tt-card-url-status">${validIcon}</span>
+                    <span class="tt-card-source">${escapeHtml(t.source)}</span>
                     <a href="${escapeHtml(t.url)}" target="_blank" rel="noopener" class="tt-card-url">${escapeHtml(t.url)}</a>
                     <button class="tt-copy-btn" onclick="ttCopyUrl(this, '${t.url.replace(/'/g, "\\'")}')">コピー</button>
                 </div>
@@ -1648,7 +1562,6 @@ ${invalidIndices.map((idx, j) => {
                 btn.style.color = '';
             }, 1500);
         } catch {
-            // fallback: テキスト選択
             prompt('URLをコピーしてください:', url);
         }
     }
